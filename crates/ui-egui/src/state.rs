@@ -307,6 +307,11 @@ pub struct UiState {
     /// restored at the next launch (the desktop host reads and writes it; none on the web).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<WindowGeometry>,
+    /// File → Share / Collaborate: the name shown to the others and the server joined last.
+    #[serde(default)]
+    pub collab_name: String,
+    #[serde(default)]
+    pub collab_server: String,
 }
 
 /// The desktop window's geometry, kept across launches.
@@ -384,6 +389,8 @@ impl Default for UiState {
             dxf_import: Value::Null,
             home: None,
             window: None,
+            collab_name: String::new(),
+            collab_server: String::new(),
         }
     }
 }

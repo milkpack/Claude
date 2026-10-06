@@ -49,7 +49,11 @@ pub fn start() {
                     }
                     let inbox: Inbox = Arc::default();
                     let place_inbox: PlaceInbox = Arc::default();
-                    let app = VectorcraftApp::new(Session::new(), services(inbox.clone(), place_inbox.clone(), cc.egui_ctx.clone()));
+                    let mut app = VectorcraftApp::new(Session::new(), services(inbox.clone(), place_inbox.clone(), cc.egui_ctx.clone()));
+                    // An invite link (`?room=…[&server=…]`) joins its room at once.
+                    if let Some(Err(e)) = vectorcraft_ui_egui::collab::join_from_query(&mut app, &query()) {
+                        app.status(format!("Couldn't join the room: {e}"));
+                    }
                     Ok(Box::new(WebShell { app, inbox, place_inbox, drag }))
                 }),
             )

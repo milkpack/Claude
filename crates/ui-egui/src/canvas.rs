@@ -330,6 +330,8 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
         let overlays = app.session.overlays(view_info);
         draw_overlays(&painter, &xf, &overlays, &t);
     }
+    // Collaborating: the others' selections and pointers.
+    crate::collab::overlay::paint_peers(app, &painter, &xf);
     crate::place::paint_drop_highlight(app, ui.ctx(), &painter, rect);
 
     if app.ui.view.rulers && app.ui.screen_mode < 3 {

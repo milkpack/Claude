@@ -380,6 +380,7 @@ pub fn status_bar(app: &mut VectorcraftApp, ui: &mut Ui) {
                 let tool = vectorcraft_tools::tool_info(app.session.tool_id()).map(|t| t.label.trim_end_matches(" Tool")).unwrap_or("");
                 ui.label(egui::RichText::new(tool).size(11.5).color(t.text_dim));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    crate::collab::overlay::status_strip(app, ui);
                     ui.label(
                         egui::RichText::new(format!(
                             "render {:.1} ms · ui {:.1} ms · {:.0} fps",

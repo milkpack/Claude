@@ -9,6 +9,7 @@ pub mod background;
 mod brand;
 pub mod canvas;
 pub mod chrome;
+pub mod collab;
 pub mod community;
 pub mod control;
 pub mod cursors;
@@ -300,6 +301,8 @@ pub struct VectorcraftApp {
     host_modifiers: egui::Modifiers,
     /// Synthetic input set the modifiers egui holds (see [`Self::raw_input_hook`]).
     synthetic_modifiers: bool,
+    /// File → Share / Collaborate: the document shared with a room ([`collab`]).
+    pub collab: collab::CollabState,
 }
 
 /// Seconds between two looks at the system clipboard for [`VectorcraftApp::system_paste`].
@@ -359,6 +362,7 @@ impl VectorcraftApp {
             recovery: Default::default(),
             host_modifiers: Default::default(),
             synthetic_modifiers: false,
+            collab: Default::default(),
         }
     }
 
@@ -692,6 +696,7 @@ impl VectorcraftApp {
             ctx.copy_text(t);
         }
         self.drain_inbox();
+        collab::frame(self, ctx);
         if self.fonts_ready {
             shortcuts::handle(self, ctx);
         }

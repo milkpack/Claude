@@ -50,6 +50,25 @@ use Item::Sep;
 
 /// UI-level commands: (id, label, shortcut, params doc).
 pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
+    (
+        "collab.share",
+        "Share / Collaborate…",
+        "",
+        "{} open Share / Collaborate (dialog `collab`: server, room (an id or a pasted invite link), name; Join runs collab.join, sharing the active document when the room is the one the dialog made up, else opening the room in a new document); while collaborating it shows the invite link, who is here and Stop Collaborating",
+    ),
+    (
+        "collab.join",
+        "Join Room",
+        "",
+        "{room? (id, invite link or ws(s)://host/collab/id; default: a new random id), server? (ws(s):// base URL; default: the last one, the web page's host, else ws://localhost:1234), name? (shown to the others), newDocument?: bool} share the active document (none open, or newDocument: a new one) with the room for real-time co-editing: an empty room takes it, else the room's document replaces it → {room, server, url, invite}",
+    ),
+    ("collab.leave", "Stop Collaborating", "", "{} leave the room: the document stays open with its own Undo history"),
+    (
+        "collab.status",
+        "Collaboration Status",
+        "",
+        "{} → {active, status: connecting|syncing|live|reconnecting, joined, room, server, url, invite, error, document (uid), you: {name, color}, peers: [{id, name, color, cursor: [x, y] (document), selection: [ids], tool}]}",
+    ),
     ("file.open", "Open…", "Cmd+O", "{path?}"),
     (
         "file.save",
@@ -682,6 +701,9 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
         *b = !*b;
         Ok(json!(*b))
     };
+    if let Some(r) = crate::collab::run_command(app, id, p) {
+        return Some(r);
+    }
     let r = match id {
         "file.newDialog" => {
             crate::dialogs::open_new_document(app);
@@ -1376,6 +1398,7 @@ pub fn enabled(app: &VectorcraftApp, id: &str) -> bool {
         | "view.actualSize" => app.session.active().is_some(),
         id if id.starts_with("file.openRecent") => recent_slot(app, id).is_some(),
         "file.clearRecent" => !app.ui.recent_files.is_empty(),
+        "collab.leave" => app.collab.session.is_some(),
         id if id.starts_with("type.recentFont") => {
             id["type.recentFont".len()..].parse::<usize>().is_ok_and(|n| n >= 1 && n <= app.ui.recent_fonts.len()) && app.session.active().is_some()
         }
@@ -1451,6 +1474,9 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
                     v
                 }),
                 c("Show in Folder", "file.reveal"),
+                Sep,
+                c("Share / Collaborate…", "collab.share"),
+                c("Stop Collaborating", "collab.leave"),
                 Sep,
                 c("Close", "file.close"),
                 c("Close All", "file.closeAll"),

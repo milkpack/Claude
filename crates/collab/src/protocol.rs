@@ -176,7 +176,9 @@ impl Connection {
     /// The message that tells the others we left (send it before closing the socket).
     pub fn goodbye(&mut self) -> Option<Vec<u8>> {
         self.awareness.clean_local_state();
-        let update = self.awareness.update().ok()?;
+        // `update()` skips clients without a state, which now includes us: name ourselves.
+        let me = self.awareness.client_id();
+        let update = self.awareness.update_with_clients([me]).ok()?;
         Some(Message::Awareness(update).encode_v1())
     }
 

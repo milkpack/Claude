@@ -11,7 +11,9 @@
 //! - Save / Export trigger a browser download;
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through the inbox.
 //!
-//! URL query flag: `?webgl` forces the WebGL2 backend instead of WebGPU.
+//! URL query flags: `?webgl` forces the WebGL2 backend instead of WebGPU; `?room=<id>` joins that
+//! collaboration room (File → Share / Collaborate…) on the page's own host
+//! (`ws(s)://<host>/collab/<id>`), or on the server `&server=<ws(s) URL>` names.
 
 #[cfg(target_arch = "wasm32")]
 mod web;
