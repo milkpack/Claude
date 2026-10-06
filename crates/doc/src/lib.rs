@@ -572,6 +572,11 @@ pub struct Document {
     /// state, never saved.
     #[serde(skip)]
     pub puppet: Option<Arc<PuppetPins>>,
+    /// Collaborative editing: the half-open range `[start, end)` this copy of the document
+    /// allocates ids from. Every participant gets its own range, so objects made at the same time
+    /// on two machines never share an id. Not saved: `None` (the default) allocates from 1 up.
+    #[serde(skip)]
+    id_range: Option<(u64, u64)>,
 }
 
 fn ppi72() -> f64 {
@@ -640,6 +645,7 @@ impl Document {
             print_setup: None,
             assets: vec![],
             puppet: None,
+            id_range: None,
         };
         let id = d.alloc_id();
         d.layers.push(Arc::new(Node::layer(id, "Layer 1", LayerColor::Preset(0))));
@@ -648,22 +654,54 @@ impl Document {
 
     /// Allocate a fresh node id.
     pub fn alloc_id(&mut self) -> NodeId {
+        if let Some((start, end)) = self.id_range
+            && !(start..end).contains(&self.next_id)
+        {
+            self.next_id = start;
+        }
         let id = NodeId(self.next_id);
-        self.next_id += 1;
+        self.next_id = self.next_id.saturating_add(1);
         id
     }
     pub fn peek_next_id(&self) -> u64 {
         self.next_id
     }
-    /// Ensure `next_id` is above every id in the tree (after deserializing foreign data).
+    /// Ensure `next_id` is above every id in the tree (after deserializing foreign data). With an
+    /// id range ([`Document::set_id_range`]) only the ids inside it count: ids in other
+    /// participants' ranges belong to them.
     pub fn fix_next_id(&mut self) {
+        let range = self.id_range;
+        let counts = |id: u64| range.is_none_or(|(start, end)| (start..end).contains(&id));
         let mut max = 0;
         for l in &self.layers {
-            l.walk(&mut |n| max = max.max(n.id.0));
+            l.walk(&mut |n| {
+                if counts(n.id.0) {
+                    max = max.max(n.id.0)
+                }
+            });
         }
-        max = self.slices.iter().fold(max, |m, s| m.max(s.id.0));
-        max = self.assets.iter().fold(max, |m, a| m.max(a.id));
-        self.next_id = self.next_id.max(max + 1);
+        max = self.slices.iter().filter(|s| counts(s.id.0)).fold(max, |m, s| m.max(s.id.0));
+        max = self.assets.iter().filter(|a| counts(a.id)).fold(max, |m, a| m.max(a.id));
+        self.next_id = self.next_id.max(max.saturating_add(1));
+        if let Some((start, end)) = range
+            && !(start..end).contains(&self.next_id)
+        {
+            self.next_id = start.max(max.saturating_add(1));
+        }
+    }
+    /// Collaborative editing: allocate ids from `[start, end)` from now on, never below `next`
+    /// (the first id this participant hasn't handed out yet), nor below an id already used inside
+    /// the range. `None` goes back to allocating from 1 up.
+    pub fn set_id_range(&mut self, range: Option<(u64, u64)>, next: u64) {
+        self.id_range = range.filter(|(start, end)| start < end);
+        if let Some((start, _)) = self.id_range {
+            self.next_id = start.max(next);
+        }
+        self.fix_next_id();
+    }
+    /// The id range set by [`Document::set_id_range`].
+    pub fn id_range(&self) -> Option<(u64, u64)> {
+        self.id_range
     }
 
     /// Find a node anywhere in the tree.
@@ -952,7 +990,10 @@ impl Document {
     /// Make the next id allocated at least `next`: ids handed out outside the layer tree (such
     /// as an importer's opacity mask and pattern art), which [`Document::fix_next_id`] doesn't see.
     pub fn reserve_ids(&mut self, next: u64) {
-        self.next_id = self.next_id.max(next);
+        // Outside this participant's id range the ids belong to someone else (see `id_range`).
+        if self.id_range.is_none_or(|(start, end)| (start..=end).contains(&next)) {
+            self.next_id = self.next_id.max(next);
+        }
     }
 }
 
@@ -969,6 +1010,26 @@ mod tests {
         let b = d.alloc_id();
         d.insert(Some(layer), usize::MAX, Node::path(b, shapes::rectangle(Rect::new(20.0, 0.0, 30.0, 10.0)), Appearance::default_art())).unwrap();
         (d, a, b)
+    }
+
+    #[test]
+    fn id_range_keeps_participants_apart() {
+        let mut d = Document::new(100.0, 100.0);
+        d.set_id_range(Some((1 << 32, 2 << 32)), 0);
+        let a = d.alloc_id();
+        assert_eq!(a.0, 1 << 32);
+        // Someone else's objects (another range) don't move our counter…
+        d.layers[0] = Arc::new(Node::layer(NodeId(5 << 32), "Theirs", LayerColor::Preset(1)));
+        d.fix_next_id();
+        assert_eq!(d.alloc_id().0, (1 << 32) + 1);
+        d.reserve_ids(9 << 32);
+        assert_eq!(d.alloc_id().0, (1 << 32) + 2);
+        // …and the counter never goes back, even when our objects are gone.
+        d.set_id_range(Some((1 << 32, 2 << 32)), (1 << 32) + 10);
+        assert_eq!(d.alloc_id().0, (1 << 32) + 10);
+        d.set_id_range(None, 0);
+        d.fix_next_id();
+        assert!(d.alloc_id().0 > 5 << 32);
     }
 
     #[test]

@@ -148,10 +148,16 @@ pub fn has_multi(s: &Session) -> std::result::Result<(), String> {
     if st.selection.len() < 2 { Err("select at least two objects".into()) } else { Ok(()) }
 }
 pub fn can_undo(s: &Session) -> std::result::Result<(), String> {
-    s.active().filter(|d| !d.history.undo.is_empty()).map(|_| ()).ok_or_else(|| "nothing to undo".into())
+    s.active()
+        .filter(|d| d.shared_history.as_ref().map_or(!d.history.undo.is_empty(), |h| h.can_undo || d.interaction.is_some()))
+        .map(|_| ())
+        .ok_or_else(|| "nothing to undo".into())
 }
 pub fn can_redo(s: &Session) -> std::result::Result<(), String> {
-    s.active().filter(|d| !d.history.redo.is_empty()).map(|_| ()).ok_or_else(|| "nothing to redo".into())
+    s.active()
+        .filter(|d| d.shared_history.as_ref().map_or(!d.history.redo.is_empty(), |h| h.can_redo))
+        .map(|_| ())
+        .ok_or_else(|| "nothing to redo".into())
 }
 pub fn has_clipboard(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;

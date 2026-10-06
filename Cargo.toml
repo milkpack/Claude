@@ -33,6 +33,10 @@ vectorcraft-cad = { path = "crates/cad" }
 vectorcraft-eps = { path = "crates/eps" }
 vectorcraft-metafile = { path = "crates/metafile" }
 vectorcraft-plugins = { path = "crates/plugins" }
+vectorcraft-collab = { path = "crates/collab" }
+
+# collaboration (Yjs-compatible CRDT and its sync protocol)
+yrs = { version = "0.28", features = ["sync"] }
 
 # foundation
 kurbo = { version = "0.13", features = ["serde"] }

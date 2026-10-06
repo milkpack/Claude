@@ -121,6 +121,11 @@ fn undo(s: &mut Session, _: &Value) -> Result<Value> {
     // back only that and Redo brings it back, instead of dropping it and undoing the step before.
     s.commit_interaction()?;
     let st = s.doc_mut()?;
+    if let Some(shared) = &mut st.shared_history {
+        shared.requests.push(crate::HistoryRequest::Undo);
+        shared.can_redo = true;
+        return Ok(json!({ "undone": "shared", "pending": true }));
+    }
     let e = st.history.undo.pop().ok_or_else(|| EngineError::Other("nothing to undo".into()))?;
     let label = e.label.clone();
     let editing = st.doc.mask_edit.map(|m| m.layer);
@@ -137,6 +142,10 @@ fn undo(s: &mut Session, _: &Value) -> Result<Value> {
 
 fn redo(s: &mut Session, _: &Value) -> Result<Value> {
     let st = s.doc_mut()?;
+    if let Some(shared) = &mut st.shared_history {
+        shared.requests.push(crate::HistoryRequest::Redo);
+        return Ok(json!({ "redone": "shared", "pending": true }));
+    }
     let e = st.history.redo.pop().ok_or_else(|| EngineError::Other("nothing to redo".into()))?;
     let label = e.label.clone();
     let editing = st.doc.mask_edit.map(|m| m.layer);

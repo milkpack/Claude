@@ -1,0 +1,23 @@
+[package]
+name = "vectorcraft-collab"
+description = "Real-time collaborative editing: a VectorCraft document mirrored in a Yjs-compatible CRDT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vectorcraft-doc = { workspace = true }
+yrs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+vectorcraft-geom = { workspace = true }
+vectorcraft-color = { workspace = true }

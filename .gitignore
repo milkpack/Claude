@@ -5,3 +5,5 @@ plan/
 /corpus
 /log
 .DS_Store
+# collaboration server storage (apps/vectorcraft-collab-server)
+/collab-data

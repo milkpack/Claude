@@ -60,6 +60,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("eps", Class::Layer(3)),
     ("metafile", Class::Layer(3)),
     ("plugins", Class::Layer(2)),
+    ("collab", Class::Layer(2)),
+    ("collab-server", Class::Exempt),
 ];
 
 /// Explicit orderings *within* a layer (earlier may be used by later).

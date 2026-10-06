@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod collab;
 pub mod guard;
 pub mod inspect;
 mod tooling;
@@ -138,6 +139,24 @@ pub struct DocState {
     /// Transform Again after a perspective move or scale (Perspective Selection tool): the
     /// `perspective.transform` params it repeats. `None` once an ordinary transform follows.
     pub last_perspective: Option<Value>,
+    /// Collaborative editing ([`collab`]): Undo and Redo act on the room's shared history, where
+    /// they take back only this participant's changes, instead of on the snapshots in `history`.
+    pub shared_history: Option<SharedHistory>,
+}
+
+/// Undo/Redo for a document shared with others ([`DocState::shared_history`]). The commands
+/// queue a request; the collaboration layer carries it out on its next sync ([`collab::Collab`]).
+#[derive(Clone, Debug, Default)]
+pub struct SharedHistory {
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub requests: Vec<HistoryRequest>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryRequest {
+    Undo,
+    Redo,
 }
 
 static NEXT_DOC_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -171,6 +190,7 @@ impl DocState {
             recovery: None,
             print_tiling: false,
             last_perspective: None,
+            shared_history: None,
         }
     }
     /// Unsaved changes: the document differs from the saved one (selection changes don't count).
@@ -1187,6 +1207,8 @@ mod tests_clippaint;
 mod tests_cmdsplit;
 #[cfg(test)]
 mod tests_cmykflatten;
+#[cfg(test)]
+mod tests_collab;
 #[cfg(test)]
 mod tests_colorguide;
 #[cfg(test)]
