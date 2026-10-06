@@ -1,0 +1,27 @@
+[package]
+name = "vectorcraft-collab-server"
+description = "VectorCraft collaboration server: a Yjs sync relay with rooms and persistent storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vectorcraft-collab = { workspace = true }
+yrs = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+# HTTP + WebSocket on one port (hyper underneath; `ws` brings tokio-tungstenite).
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws", "json", "query"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+env_logger = { version = "0.11.11", default-features = false, features = ["humantime"] }
+
+[dev-dependencies]
+vectorcraft-doc = { workspace = true }
+vectorcraft-geom = { workspace = true }
+vectorcraft-color = { workspace = true }
+tokio-tungstenite = "0.29"
