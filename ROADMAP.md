@@ -34,8 +34,8 @@ since 2026-10-01.
 | Dimension | Estimate | Evidence and what's missing |
 |---|---|---|
 | **Breadth:** menus, tools and panels exist | ~90% | 18 menu items still stubbed; every tool implemented except Touch Type and vertical type ×3; 51 panel modules |
-| **Depth:** each feature behaves like Illustrator | ~69–75% | Strong: paint, appearance and colour (M3), Pathfinder and booleans, selection, drawing, files (M4). Weak: advanced type (~35%), brushes and symbols (in progress), raster effects (~20%) |
-| **Large missing subsystems** | 0–20% | 3D & Materials (0%), Photoshop-style raster effects and the Effect Gallery (~1 of ~56 filters), SVG Filters, vertical/CJK type, Variables (data merge), scripting |
+| **Depth:** each feature behaves like Illustrator | ~69–75% | Strong: paint, appearance and colour (M3), Pathfinder and booleans, selection, drawing, files (M4). Weak: advanced type (~35%), brushes and symbols (in progress), raster effects (~45%) |
+| **Large missing subsystems** | 0–20% | 3D & Materials (0%), Photoshop-style raster effects (99 PhotoCraft filters wired as live effects; Effect Gallery stack dialog missing), SVG Filters, vertical/CJK type, Variables (data merge), scripting |
 | **Interaction fidelity:** modifiers, cursors, small behaviours | ~30–40% | The dedicated pass hasn't started, and there has been no side-by-side session with Illustrator yet. A power user notices this first |
 | **Look & feel** | ~75–80% | Measured against Illustrator 2026 screenshots (2026-10-02); the panels added since haven't been re-measured |
 | **File interop** | ~85% | SVG/SVGZ, PDF and PDF-compatible `.ai`, EPS, DXF, EMF/WMF, raster formats, PSD export, Place and Links, Package, Print, clipboard flavours. Native `.ai` private data is out of scope by design; DWG has no open spec |
@@ -52,9 +52,11 @@ Ordered by how much each gap blocks someone from switching. Sizes are one-agent 
 1. **Interaction fidelity:** go tool by tool and panel by panel against `plan/illustrator/05-tools.md`,
    `06-panels.md` and `09-shortcuts.md`, covering modifier keys, cursors, the Properties panel per context and
    isolation mode. Do it side by side with Illustrator where the owner allows. 60–90 h.
-2. **Photoshop-style raster effects and the Effect Gallery:** about 55 filters (Artistic, Brush Strokes, Distort,
-   Pixelate, Sketch, Stylize, Texture, Video) on the raster pipeline that drop shadows already use, applied at
-   Document Raster Effects Settings resolution. Parallelizes well across agents. 28–42 h.
+2. **Photoshop-style raster effects and the Effect Gallery:** PhotoCraft's filters (`photocraft-algo`, git dep pinned)
+   now run as live effects on every object kind (blurs, sharpen, noise, pixelate, render, stylize, distort, other,
+   video and all 47 gallery filters; distances in points; SVG/PDF export as embedded images; see
+   `docs/photocraft-effects.md`). Left: the Effect Gallery stacking dialog with previews, Field/Path Blur, Displace,
+   multi-light Lighting Effects, a side-by-side look check against Illustrator. 8–14 h.
 3. **3D and Materials:** Extrude & Bevel, Revolve, Inflate and Rotate with lighting and materials, using a software
    renderer in its own crate (layering allows it below L6), with output in SVG/PDF as rasters or projected vectors.
    The largest single gap. 50–80 h.
@@ -83,6 +85,7 @@ When a task lands, update this section, the parity table and "Shipped so far" in
 grade by behaviour against `plan/illustrator/`, not by whether a menu item exists.
 
 ## Shipped so far
+- **Procedural objects (core, 2026-10-06):** Graphite-style node graphs (`crates/procedural`, Object › Procedural, `procedural.*` commands): 39 node kinds (generate / source art / points / instance / modify incl. noise, morph, booleans / style), 9 presets, deterministic seeded evaluation with per-node errors, caps and a cache; see `docs/procedural.md`. Next: the node-graph panel UI on top of these commands.
 - **Architecture:** 19+ crates with enforced layering (`cargo xtask layers`). Every action is a command (~400 engine + ~50 UI). Undo is unlimited via structural sharing. `command.batch` runs several commands as one transaction.
 - **Automation:**
   - Actions panel (record/playback, persisted), generic parameter dialogs for every "…" command.
@@ -176,7 +179,7 @@ about 1–1.5 agent-hours each, so the other rows (estimated on the older scale)
 | Strokes, brushes, width profiles | 5 | 88% | brush options depth, brush libraries (generated in code) | 6–10 |
 | Appearance, transparency, graphic styles, masks | 5 | 98% | raster effect reach in preview bounds (flattener presets apply in PDF, EPS and print) | 1–2 |
 | Live vector effects | 5 | 85% | Outline Object, Pathfinder Hard/Soft Mix and Trap, SVG Filters | 6–10 |
-| Raster effects (Effect Gallery, Document Raster Effects Settings) | 4 | 20% | ~55 Photoshop-style filters (Artistic, Brush Strokes, Distort, Pixelate, Sketch, Stylize, Texture, Video) and the Effect Gallery; Document Raster Effects Settings and raster effects in PDF are done | 28–42 |
+| Raster effects (Effect Gallery, Document Raster Effects Settings) | 4 | 45% | Effect Gallery stacking dialog with previews, Field/Path Blur, Displace, multi-light Lighting Effects, look check vs Illustrator; 99 PhotoCraft filters as live effects, Document Raster Effects Settings and raster effects in PDF/SVG are done | 8–14 |
 | 3D and Materials | 4 | 0% | Extrude & Bevel, Revolve, Inflate, Rotate, lighting, materials (software renderer) | 50–80 |
 | Type core | 9 | 78% | composer/hyphenation options, Optical Margin Alignment, hidden characters | 15–20 |
 | Type advanced | 4 | 35% | vertical type/CJK, tab leaders, spell check (open dictionary), Touch Type, Retype | 26–35 |
@@ -202,7 +205,7 @@ With 4–6 agents working on disjoint crates (as the layering allows) the wall-c
 
 _Inventories (2026-10-05):_ 18 menu items still stubbed (`todo(…)` in `crates/ui-egui/src/menus.rs`); every tool
 implemented except four (Touch Type, vertical type ×3); 51 panel modules; Illustrator-style live
-effects ~44/54, Photoshop-style raster effects ~1/56, 3D 0/5; ~2,840 tests; ~221k lines of Rust.
+effects ~44/54, Photoshop-style raster effects ~50/56 (PhotoCraft filters; no Effect Gallery dialog), 3D 0/5; ~2,840 tests; ~221k lines of Rust.
 
 _Where we already beat Illustrator:_ exact curve booleans, off-thread multithreaded rendering, undo that never runs out,
 lossless SVG/PDF export of live effects with SVG filters, a documented JSON format, the same app on the web, and every

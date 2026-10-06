@@ -168,6 +168,12 @@ pub(crate) fn cull_bounds(n: &Node) -> Option<Rect> {
     }
 }
 
+/// How far raster effects `rfx` paint beyond their content (as [`effects::outset`]).
+fn fx_outset(rfx: &[RasterFx]) -> f64 {
+    let others = rfx.iter().filter(|x| !matches!(x, RasterFx::Pixel(_))).map(RasterFx::outset).fold(0.0, f64::max);
+    others + rfx.iter().filter(|x| matches!(x, RasterFx::Pixel(_))).map(RasterFx::outset).sum::<f64>()
+}
+
 fn shadow_filter(dx: f64, dy: f64, blur: f64, color: peniko::Color) -> Filter {
     Filter::from_primitive(FilterPrimitive::DropShadowOnly {
         dx: dx as f32,
@@ -480,6 +486,23 @@ impl Renderer {
         rfx: &[RasterFx],
         paint: &mut dyn FnMut(&mut Self, &mut RenderContext, &Frame),
     ) {
+        // A raster filter applies to the content with the effects before it, and the effects after
+        // it apply to the filtered pixels (a shadow after a twirl is the twirled object's).
+        if let Some(k) = rfx.iter().rposition(|x| matches!(x, RasterFx::Pixel(_))) {
+            let (before, rest) = rfx.split_at(k);
+            let Some((RasterFx::Pixel(pfx), after)) = rest.split_first() else { return };
+            let o = fx_outset(before);
+            let inner_reach = content.reach.inflate(o, o);
+            let key = content.cache.map(|slot| (content.node as *const Node as usize, slot + k, f.ink));
+            let node = content.node;
+            let mut filtered = |r: &mut Self, c: &mut RenderContext, fr: &Frame| {
+                r.pixel_fx(c, fr, node, key, before, inner_reach, pfx, &mut |r2, c2, fr2| r2.raster_fx(c2, fr2, content, before, paint));
+            };
+            let o = pfx.outset();
+            let outer = Content { node, cache: None, reach: inner_reach.inflate(o, o), outline: content.outline };
+            self.raster_fx(ctx, f, &outer, after, &mut filtered);
+            return;
+        }
         let reach = content.reach;
         // Below the content: shadows and outer glows.
         for (i, fx) in rfx.iter().enumerate().filter(|(_, x)| x.is_below()) {

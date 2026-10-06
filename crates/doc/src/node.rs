@@ -331,6 +331,10 @@ pub struct Node {
     /// Graph object: the group's children are generated from this spec (Object → Graph).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph: Option<Box<crate::graph::GraphSpec>>,
+    /// Procedural object: the group's children are generated from this node graph
+    /// (Object → Procedural, see [`crate::procedural`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedural: Option<Box<crate::procedural::ProcGraph>>,
     pub kind: NodeKind,
     /// The [`crate::GraphicStyle::id`] last applied to this object. It stays linked while it keeps
     /// that style's look: editing its appearance or transparency breaks the link.
@@ -395,6 +399,7 @@ impl Node {
             trace: None,
             wrap: None,
             graph: None,
+            procedural: None,
             kind,
             graphic_style: None,
             attrs: None,
@@ -674,6 +679,10 @@ impl Node {
             && m.linked
         {
             Arc::make_mut(&mut m.art).transform_scaled(a, sc);
+        }
+        // A procedural object's regenerated art keeps following the object.
+        if let Some(g) = &mut self.procedural {
+            g.transform(a);
         }
     }
     /// Visit this node and all descendants depth first (paint order).

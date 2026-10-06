@@ -129,6 +129,7 @@ pub(crate) fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         params["style"] = json!(s.crop_mark_style().id());
     }
     let effect = effects::new_effect(id, &params).ok_or_else(|| bad(C, format!("unknown effect `{id}`")))?;
+    effects::check_params(id, &effect.params).map_err(|e| bad(C, e))?;
     let label = effects::effect_info(id).map(|e| e.label.trim_end_matches('…').to_string()).unwrap_or_default();
     let item = item_target(s, p, C)?;
     let mut index = 0;
@@ -236,6 +237,20 @@ fn set_params(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let visible = p.get("visible").and_then(Value::as_bool);
     let item = item_target(s, p, C)?;
+    // Raster filter parameters are checked before anything changes.
+    if let Value::Object(new) = &params {
+        let doc = &s.doc()?.doc;
+        for id in appearance_targets(s, p)? {
+            let Some(n) = doc.node(id) else { continue };
+            let Ok(list) = item.effects_item(&n.appearance, C) else { continue };
+            let Some(e) = n.appearance.effects_at(list).and_then(|fx| fx.get(index)) else { continue };
+            let mut merged = effects::merged_params(&e.id, &e.params);
+            if let Value::Object(m) = &mut merged {
+                m.extend(new.clone());
+            }
+            effects::check_params(&e.id, &merged).map_err(|err| bad(C, err))?;
+        }
+    }
     let ids = edit_effects(s, p, item, C, "Effect Options", &format!("{C}: no effect at index {index}"), |fx| {
         let Some(e) = fx.get_mut(index) else { return false };
         if let (Value::Object(new), cur) = (&params, &mut e.params) {

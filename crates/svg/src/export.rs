@@ -1467,7 +1467,13 @@ impl Writer<'_> {
     /// stroke's) on `n`, outermost last effect; returns how many to close.
     fn open_filters(&mut self, n: &Node, effects: &[vectorcraft_doc::Effect]) -> usize {
         use vectorcraft_effects::RasterFx;
-        let fx = vectorcraft_effects::raster_effects(effects);
+        let mut fx = vectorcraft_effects::raster_effects(effects);
+        // Raster filters have no SVG filter: SVG export (`file.export.svg`) draws them as embedded
+        // images beforehand; any left here (other writers' callers) are reported and left out.
+        if fx.iter().any(|f| matches!(f, RasterFx::Pixel(_))) {
+            self.warn("raster filter effects (blurs, distortions, gallery filters…) are left out of this SVG");
+            fx.retain(|f| !matches!(f, RasterFx::Pixel(_)));
+        }
         if self.tiny() {
             if !fx.is_empty() {
                 self.warn("SVG Tiny 1.2 has no filters: shadows, glows, blurs and feathers are left out");
@@ -1525,6 +1531,8 @@ impl Writer<'_> {
                     sd(*radius)
                 ),
                 RasterFx::GaussianBlur { radius } => format!("<feGaussianBlur in=\"SourceGraphic\" stdDeviation=\"{}\"/>", sd(*radius)),
+                // Removed above.
+                RasterFx::Pixel(_) => continue,
             };
             // Filters composite normally: a shadow's or glow's other blend mode is recorded for import.
             let mode = match f {

@@ -15,6 +15,7 @@ mod ink;
 mod live;
 mod paint;
 mod pattern;
+mod pixelfx;
 pub mod proof;
 
 use std::collections::HashMap;
@@ -303,6 +304,8 @@ pub struct Renderer {
     live: live::LiveCache,
     /// Blurred, tinted drop shadow / outer glow rasters per object and effect (see `fx`).
     shadows: PtrMap<(usize, usize, Ink), fx::ShadowEntry>,
+    /// Rasters filtered by raster filter effects per object and effect (see `pixelfx`).
+    pixel_cache: PtrMap<pixelfx::PixelKey, pixelfx::PixelEntry>,
     /// Whether the group being drawn is a knockout group (what its neutral children inherit).
     knockout: bool,
     /// Address of the knockout-group element being drawn as its knockout shape: at full object
@@ -394,6 +397,7 @@ impl Renderer {
             stats: FrameStats::default(),
             brushes: Default::default(),
             shadows: PtrMap::default(),
+            pixel_cache: PtrMap::default(),
             live: live::LiveCache::default(),
             knockout: false,
             shape_of: 0,
@@ -460,6 +464,9 @@ impl Renderer {
         }
         if self.shadows.len() > 256 {
             self.shadows.retain(|_, e| g - e.stamp <= 3);
+        }
+        if self.pixel_cache.len() > 64 {
+            self.pixel_cache.retain(|_, e| g - e.stamp <= 3);
         }
         if !inks {
             proof::post(&mut pixels, opts);
@@ -1587,6 +1594,8 @@ mod tests_isolation;
 mod tests_knockout;
 #[cfg(test)]
 mod tests_objectfx;
+#[cfg(test)]
+mod tests_pixelfx;
 #[cfg(test)]
 mod tests_setup;
 #[cfg(test)]

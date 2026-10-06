@@ -3157,6 +3157,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "photocraft-algo"
+version = "0.2.0"
+source = "git+https://github.com/storytold/photocraft?rev=44bf13e8903316d17291216adadc15fc357cb875#44bf13e8903316d17291216adadc15fc357cb875"
+dependencies = [
+ "photocraft-color",
+ "photocraft-geom",
+ "photocraft-raster",
+ "rayon",
+ "serde",
+]
+
+[[package]]
+name = "photocraft-cms"
+version = "0.2.0"
+source = "git+https://github.com/storytold/photocraft?rev=44bf13e8903316d17291216adadc15fc357cb875#44bf13e8903316d17291216adadc15fc357cb875"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "photocraft-color"
+version = "0.2.0"
+source = "git+https://github.com/storytold/photocraft?rev=44bf13e8903316d17291216adadc15fc357cb875#44bf13e8903316d17291216adadc15fc357cb875"
+dependencies = [
+ "photocraft-cms",
+ "serde",
+]
+
+[[package]]
+name = "photocraft-geom"
+version = "0.2.0"
+source = "git+https://github.com/storytold/photocraft?rev=44bf13e8903316d17291216adadc15fc357cb875#44bf13e8903316d17291216adadc15fc357cb875"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "photocraft-raster"
+version = "0.2.0"
+source = "git+https://github.com/storytold/photocraft?rev=44bf13e8903316d17291216adadc15fc357cb875#44bf13e8903316d17291216adadc15fc357cb875"
+dependencies = [
+ "photocraft-color",
+ "photocraft-geom",
+ "serde",
+]
+
+[[package]]
 name = "pico-args"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4926,6 +4973,12 @@ name = "vectorcraft-effects"
 version = "0.3.0"
 dependencies = [
  "kurbo 0.13.1",
+ "photocraft-algo",
+ "photocraft-color",
+ "photocraft-geom",
+ "photocraft-raster",
+ "proptest",
+ "serde",
  "serde_json",
  "vectorcraft-color",
  "vectorcraft-doc",
@@ -4959,6 +5012,7 @@ dependencies = [
  "vectorcraft-pathops",
  "vectorcraft-pdf",
  "vectorcraft-plugins",
+ "vectorcraft-procedural",
  "vectorcraft-render",
  "vectorcraft-svg",
  "vectorcraft-testkit",
@@ -5095,6 +5149,21 @@ dependencies = [
  "vectorcraft-geom",
  "wasmi",
  "wat",
+]
+
+[[package]]
+name = "vectorcraft-procedural"
+version = "0.3.0"
+dependencies = [
+ "kurbo 0.13.1",
+ "libm",
+ "proptest",
+ "serde",
+ "serde_json",
+ "vectorcraft-color",
+ "vectorcraft-doc",
+ "vectorcraft-geom",
+ "vectorcraft-pathops",
 ]
 
 [[package]]

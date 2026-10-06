@@ -2558,7 +2558,7 @@ fn effect_menu() -> Vec<Item> {
         }
         let items: Vec<Item> = cat
             .iter()
-            .filter(|e| e.menu.last().copied() == Some(sub_name))
+            .filter(|e| e.menu == ["Effect", sub_name])
             .map(|e| match e.defaults.as_object().is_some_and(|o| o.is_empty()) {
                 // No options (Effect → Pathfinder): apply directly, like Illustrator.
                 true => Item::Cmd(e.label, "effect.apply", json!({ "effect": e.id })),
@@ -2566,12 +2566,26 @@ fn effect_menu() -> Vec<Item> {
             })
             .collect();
         if sub_name == "Blur" {
-            // Live-effect plug-ins close the vector effects.
+            // Live-effect plug-ins close the vector effects; the raster effects follow, Blur
+            // among the image filters' submenus (Effect › Raster Effects › …).
             out.extend(crate::dialogs::plugin::effect_menu());
-            if !items.is_empty() {
-                out.push(Sep);
-                out.push(Item::Header("Raster Effects"));
-                out.push(sub(sub_name, items));
+            out.push(Sep);
+            out.push(Item::Header("Raster Effects"));
+            for raster in vectorcraft_effects::pixel::RASTER_MENUS {
+                let entries: Vec<Item> = cat
+                    .iter()
+                    .filter(|e| {
+                        e.menu == ["Effect", vectorcraft_effects::pixel::RASTER_MENUS_PARENT, raster]
+                            || (raster == "Blur" && e.menu == ["Effect", "Blur"])
+                    })
+                    .map(|e| match e.defaults.as_object().is_some_and(|o| o.is_empty()) {
+                        true => Item::Cmd(e.label, "effect.apply", json!({ "effect": e.id })),
+                        false => Item::Cmd(e.label, "effect.dialog", json!({ "effect": e.id })),
+                    })
+                    .collect();
+                if !entries.is_empty() {
+                    out.push(sub(raster, entries));
+                }
             }
             continue;
         }
@@ -2587,7 +2601,11 @@ fn effect_menu() -> Vec<Item> {
         }
     }
     // Anything not placed above (future effects) still shows up.
-    for e in cat.iter().filter(|e| !top_level(e) && !e.menu.last().is_some_and(|m| order.contains(m))) {
+    let placed = |e: &vectorcraft_effects::EffectInfo| {
+        e.menu.len() == 2 && e.menu.last().is_some_and(|m| order.contains(m))
+            || e.menu.get(1) == Some(&vectorcraft_effects::pixel::RASTER_MENUS_PARENT)
+    };
+    for e in cat.iter().filter(|e| !top_level(e) && !placed(e)) {
         out.push(Item::Cmd(e.label, "effect.dialog", json!({ "effect": e.id })));
     }
     out
@@ -2606,6 +2624,48 @@ pub fn item_shortcut(id: &str, p: &Value) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effect_menu_has_the_raster_filter_submenus() {
+        let menu = effect_menu();
+        let subs = |items: &[Item]| -> Vec<(&'static str, Vec<String>)> {
+            items
+                .iter()
+                .filter_map(|i| match i {
+                    Item::Sub(l, kids) => Some((
+                        *l,
+                        kids.iter()
+                            .filter_map(|k| match k {
+                                Item::Cmd(_, _, p) => p.get("effect").and_then(Value::as_str).map(str::to_string),
+                                _ => None,
+                            })
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect()
+        };
+        let all = subs(&menu);
+        let find = |name: &str| all.iter().filter(|(l, _)| *l == name).map(|(_, ids)| ids.clone()).collect::<Vec<_>>();
+        // Two Stylize submenus: the vector one and the raster one, each with its own effects.
+        let stylize = find("Stylize");
+        assert_eq!(stylize.len(), 2);
+        assert!(stylize[0].contains(&"stylize.dropShadow".to_string()) && !stylize[0].contains(&"stylize.emboss".to_string()));
+        assert!(stylize[1].contains(&"stylize.emboss".to_string()) && stylize[1].contains(&"gallery.glowingEdges".to_string()));
+        let blur = find("Blur");
+        assert_eq!(blur.len(), 1);
+        assert!(blur[0].contains(&"blur.gaussian".to_string()) && blur[0].contains(&"blur.motion".to_string()));
+        for (name, id) in
+            [("Pixelate", "pixelate.crystallize"), ("Sketch", "gallery.chrome"), ("Video", "video.ntscColors"), ("Distort", "distort.twirl")]
+        {
+            assert!(find(name).iter().any(|ids| ids.contains(&id.to_string())), "{name} › {id}");
+        }
+        // Every raster filter is in the menu exactly once.
+        let ids: Vec<&String> = all.iter().flat_map(|(_, ids)| ids).collect();
+        for d in vectorcraft_effects::pixel::pixel_defs() {
+            assert_eq!(ids.iter().filter(|i| i.as_str() == d.id).count(), 1, "{}", d.id);
+        }
+    }
 
     #[test]
     fn last_effect_dialog_and_view_toggles() {

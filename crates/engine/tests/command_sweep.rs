@@ -248,6 +248,17 @@ fn structured_junk() {
         ("effect.apply", json!({"effect": "distort.transform", "params": {"copies": 1e308}})),
         ("effect.apply", json!({"effect": "stylize.dropShadow", "params": {"blur": 1e308, "opacity": -1}})),
         ("effect.apply", json!({"effect": "no.such.effect"})),
+        // Raster filter effects (PhotoCraft's filters): extreme and wrong-typed parameters.
+        ("effect.apply", json!({"effect": "blur.box", "params": {"radius": 1e308}})),
+        ("effect.apply", json!({"effect": "blur.motion", "params": {"distance": -1e308, "angle": 1e308}})),
+        ("effect.apply", json!({"effect": "distort.wave", "params": {"generators": 1e9, "wavelengthMax": 1e308, "type": "nope"}})),
+        ("effect.apply", json!({"effect": "distort.twirl", "params": {"angle": "spin"}})),
+        ("effect.apply", json!({"effect": "other.custom", "params": {"kernel": "1e308 1e308", "scale": 0}})),
+        ("effect.apply", json!({"effect": "other.offset", "params": {"horizontal": 1e308, "vertical": -1e308}})),
+        ("effect.apply", json!({"effect": "pixelate.mosaic", "params": {"cellSize": 1e-308}})),
+        ("effect.apply", json!({"effect": "gallery.roughPastels", "params": {"texture": 7, "scaling": 1e308}})),
+        ("effect.apply", json!({"effect": "distort.shear", "params": {"points": "0,0 0.5,1e308 1,0"}})),
+        ("effect.setParams", json!({"index": 0, "params": {"radius": "huge", "angle": null}})),
         ("effect.remove", json!({"index": 99})),
         ("effect.setParams", json!({"index": 0, "params": null})),
         ("object.path.offsetPath", json!({"offset": 1e308})),
@@ -436,6 +447,67 @@ fn envelope_commands_with_junk_params_on_envelopes() {
             }
         }
     }
+    failures.sort();
+    failures.dedup();
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+/// The procedural commands on a document that has a procedural object selected (the fixtures
+/// have none): junk params from their docs plus structured junk (bad graphs, ids, ports, values).
+#[test]
+fn procedural_commands_with_junk_on_a_procedural_object() {
+    let path = safe_path();
+    let fresh = || {
+        let mut s = Fixture::Multi.session();
+        s.execute("procedural.create", &json!({"preset": "starburst"})).unwrap();
+        s
+    };
+    let mut cases: Vec<(&str, Value)> = vec![];
+    for c in command_specs().iter().filter(|c| c.id.starts_with("procedural.")) {
+        cases.push((c.id, json!({})));
+        cases.extend(junk_params(c.params, &path).into_iter().map(|p| (c.id, p)));
+    }
+    let huge_graph = json!({"nodes": [
+        {"id": 1, "kind": "points.grid", "params": {"columns": 1e9, "rows": 1e9}},
+        {"id": 2, "kind": "generate.star", "params": {"points": 1000}},
+        {"id": 3, "kind": "instance.copyToPoints", "inputs": [{"node": 1}, {"node": 2}]},
+        {"id": 4, "kind": "modify.noise", "params": {"detail": 0.25}, "inputs": [{"node": 3}]}
+    ], "output": {"node": 4}});
+    cases.extend([
+        ("procedural.setGraph", json!({"graph": huge_graph})),
+        ("procedural.setGraph", json!({"graph": {"nodes": [{"id": 1, "kind": "modify.merge", "inputs": [{"node": 1}, {"node": 4000000000u64}]}], "output": {"node": 1}}})),
+        ("procedural.setGraph", json!({"graph": {"nodes": [{"id": 1, "kind": "x", "position": [1e300, -1e300], "params": {"a": [[[]]]}}], "transform": [1e308, 0, 0, 1e308, 0, 0]}})),
+        ("procedural.setGraph", json!({"graph": {"nodes": [{"id": 4294967295u64, "kind": "source.art", "art": [{"id": 1, "kind": {"type": "group", "children": []}}]}], "output": {"node": 4294967295u64}}})),
+        ("procedural.setParam", json!({"node": 3, "param": "count", "value": 1e308})),
+        ("procedural.setParam", json!({"node": 3, "params": {"count": -1e308, "radius": "x"}})),
+        ("procedural.setParam", json!({"node": 1, "params": {"x1": 1e5, "x2": -1e5}})),
+        ("procedural.connect", json!({"from": 1, "to": 1})),
+        ("procedural.connect", json!({"from": 1, "to": 9, "port": u64::MAX})),
+        ("procedural.connect", json!({"from": 3, "to": 9, "port": 31})),
+        ("procedural.disconnect", json!({"to": 9, "port": u64::MAX})),
+        ("procedural.addNode", json!({"kind": "modify.merge", "position": [1e300, 1e300]})),
+        ("procedural.addNode", json!({"kind": "style.randomColor", "params": {"palette": []}})),
+        ("procedural.setNode", json!({"node": 1, "name": "n".repeat(10_000), "position": [0, 0], "bypass": true})),
+        ("procedural.setOutput", json!({"node": null})),
+        ("procedural.setSeed", json!({"seed": u64::MAX})),
+        ("procedural.create", json!({"graph": {"nodes": "x"}})),
+        ("procedural.create", json!({"preset": "flower", "x": 1e308, "y": 0})),
+        ("procedural.create", json!({"preset": "flower", "seed": -5})),
+    ]);
+    let mut failures = vec![];
+    for (id, p) in &cases {
+        let mut s = fresh();
+        match catch_quiet(|| s.execute(id, p)) {
+            Err(m) => failures.push(format!("PANIC {id} {p}: {m}")),
+            Ok(_) if s.in_interaction() => failures.push(format!("{id} {p}: left an interaction open")),
+            Ok(_) => {
+                if let Err(e) = check_session(&s) {
+                    failures.push(format!("{id} {p}: {e}"));
+                }
+            }
+        }
+    }
+    assert!(cases.len() > 200, "only {} cases", cases.len());
     failures.sort();
     failures.dedup();
     assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));

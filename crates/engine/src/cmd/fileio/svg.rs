@@ -150,9 +150,12 @@ pub(super) fn encode(doc: &Document, p: &Value, compressed: bool) -> Result<Enco
     let (opts, boards) = plan(doc, p)?;
     // Preserve editing embeds the native document (once, shared by every file).
     let native = opts.preserve_editing.then(|| vectorcraft_format::save(doc, false));
+    // Raster filter effects have no SVG filter: their objects are drawn as embedded images.
+    let flat = crate::cmd::rasterfx::flatten_raster_filters(doc);
+    let drawn = flat.as_ref().unwrap_or(doc);
     let mut enc = Encoded::default();
     for artboard in boards {
-        let mut out = vectorcraft_svg::export_full(doc, &ExportOptions { artboard, ..opts.clone() }, native.as_deref());
+        let mut out = vectorcraft_svg::export_full(drawn, &ExportOptions { artboard, ..opts.clone() }, native.as_deref());
         let bytes = out.take_bytes();
         for l in out.linked {
             if !enc.linked.iter().any(|e| e.name == l.name) {

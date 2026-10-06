@@ -575,6 +575,7 @@ impl Rules<'_> {
                 }
                 RasterFx::GaussianBlur { radius } => filter = Some(format!("blur({})", self.len(radius / 2.0))),
                 RasterFx::InnerGlow { .. } | RasterFx::Feather { .. } => art.unsupported("inner glows or feathering"),
+                RasterFx::Pixel(_) => art.unsupported("raster filter effects"),
             }
         }
         if !shadows.is_empty() {

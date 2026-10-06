@@ -1342,6 +1342,8 @@ mod tests_previewbounds;
 #[cfg(test)]
 mod tests_print;
 #[cfg(test)]
+mod tests_procedural;
+#[cfg(test)]
 mod tests_printadvanced;
 #[cfg(test)]
 mod tests_printpresets;

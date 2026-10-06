@@ -190,3 +190,42 @@ fn leaving_restores_local_undo() {
     a.s.execute("edit.undo", &json!({})).unwrap();
     assert!(a.doc().doc.node(r).is_none());
 }
+
+#[test]
+fn procedural_objects_converge() {
+    let mut relay = Relay::new();
+    let mut a = Client::new(1, "A");
+    let mut b = Client::new(2, "B");
+    connect(&mut relay, &mut a);
+    relay.pump(&mut [&mut a]);
+    connect(&mut relay, &mut b);
+    relay.pump(&mut [&mut a, &mut b]);
+
+    // A makes a procedural object; B gets the graph and the generated art.
+    let id = NodeId(a.s.execute("procedural.create", &json!({"preset": "jitterSquares", "x": 200, "y": 200})).unwrap()["id"].as_u64().unwrap());
+    relay.pump(&mut [&mut a, &mut b]);
+    assert_eq!(canon(a.doc()), canon(b.doc()));
+    assert!(b.doc().doc.node(id).is_some_and(|n| n.procedural.is_some()));
+
+    // B edits a parameter (regenerating the art with ids from B's range); A follows.
+    let g = b.doc().doc.node(id).unwrap().procedural.clone().unwrap();
+    let grid = g.nodes.iter().find(|n| n.kind == "instance.grid").unwrap().id;
+    b.s.execute("procedural.setParam", &json!({"id": id.0, "node": grid, "param": "columns", "value": 4})).unwrap();
+    relay.pump(&mut [&mut a, &mut b]);
+    assert_eq!(canon(a.doc()), canon(b.doc()));
+    assert_eq!(a.doc().doc.node(id).unwrap().children().unwrap().len(), 40);
+
+    // Both edit at once: A reseeds while B moves the object; they still agree.
+    a.s.execute("procedural.reseed", &json!({"id": id.0})).unwrap();
+    b.s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    b.s.execute("object.move", &json!({"dx": 25, "dy": 0})).unwrap();
+    relay.pump(&mut [&mut a, &mut b]);
+    assert_eq!(canon(a.doc()), canon(b.doc()));
+    // Ids stay unique on both sides.
+    for c in [&a, &b] {
+        let mut seen = std::collections::BTreeSet::new();
+        for l in &c.doc().doc.layers {
+            l.walk(&mut |n| assert!(seen.insert(n.id), "duplicate id {:?}", n.id));
+        }
+    }
+}

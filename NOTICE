@@ -27,5 +27,12 @@ BSD, ISC, Zlib, BSL-1.0 and Unicode-3.0).
 JPEG export uses the jpeg-encoder crate (MIT OR Apache-2.0, and the IJG License): this software is
 based in part on the work of the Independent JPEG Group.
 
+Raster filter effects (Effect › Blur, Raster Effects › …) run PhotoCraft's image filters: the
+photocraft-algo, photocraft-raster, photocraft-geom, photocraft-color and photocraft-cms crates of
+PhotoCraft (https://github.com/storytold/photocraft, commit 44bf13e8903316d17291216adadc15fc357cb875),
+Copyright (c) 2026 ArtCraft Team and the PhotoCraft contributors, MIT OR Apache-2.0. They are fetched
+by Cargo as git dependencies pinned to that commit (root Cargo.toml) and compiled into the app; no
+PhotoCraft assets are included.
+
 WebAssembly plug-ins run in the wasmi interpreter (MIT OR Apache-2.0); its wasmparser dependency is
 under the Apache License 2.0 with the LLVM exception.

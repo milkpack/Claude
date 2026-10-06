@@ -339,18 +339,18 @@ fn placed_symbol(d: &Document, n: &Node) -> Option<Node> {
 
 /// Does `n` hold raster effects PDF export draws: its own, its fills' and strokes', its opacity
 /// mask's or (groups and layers) its members'? Hidden objects and template layers aren't drawn.
-fn needs(n: &Node) -> bool {
+fn needs(px: bool, n: &Node) -> bool {
     n.visible
         && !matches!(n.kind, NodeKind::Layer { template: true, .. })
-        && (!raster_fx(n).is_empty()
-            || n.mask.as_ref().is_some_and(|m| needs(&m.art))
-            || (is_container(n) && n.children().is_some_and(|ch| ch.iter().any(|c| needs(c)))))
+        && (has_fx(px, n)
+            || n.mask.as_ref().is_some_and(|m| needs(px, &m.art))
+            || (is_container(n) && n.children().is_some_and(|ch| ch.iter().any(|c| needs(px, c)))))
 }
 
 /// The art of `n`'s opacity mask with its raster effects as images.
-fn walk_mask(out: &mut Document, n: &mut Node) {
+fn walk_mask(px: bool, out: &mut Document, n: &mut Node) {
     if let Some(m) = n.mask.as_mut()
-        && let Some(art) = walk(out, &m.art)
+        && let Some(art) = walk(px, out, &m.art)
     {
         m.art = Arc::new(art);
     }
@@ -359,15 +359,15 @@ fn walk_mask(out: &mut Document, n: &mut Node) {
 /// `n` with its raster effects (and its members' and its opacity mask's) as images, `None` when it
 /// has none. An object whose effects all paint below it keeps its vector art over an image of
 /// them; one whose effects change it (blur, feather, inner glow) becomes the image.
-fn walk(out: &mut Document, n: &Node) -> Option<Node> {
-    if !needs(n) {
+fn walk(px: bool, out: &mut Document, n: &Node) -> Option<Node> {
+    if !needs(px, n) {
         return None;
     }
-    if raster_fx(n).is_empty() {
+    if !has_fx(px, n) {
         let mut m = n.clone();
-        walk_mask(out, &mut m);
+        walk_mask(px, out, &mut m);
         if is_container(&m)
-            && let Some(ch) = walk_all(out, n.children()?)
+            && let Some(ch) = walk_all(px, out, n.children()?)
             && let Some(slot) = m.children_mut()
         {
             *slot = ch;
@@ -375,30 +375,30 @@ fn walk(out: &mut Document, n: &Node) -> Option<Node> {
         return Some(m);
     }
     if let Some(g) = placed_symbol(out, n) {
-        return Some(walk(out, &g).unwrap_or(g));
+        return Some(walk(px, out, &g).unwrap_or(g));
     }
     let below = below_only(n);
     if !below && let Some(g) = split_items(out, n) {
-        return Some(walk(out, &g).unwrap_or(g));
+        return Some(walk(px, out, &g).unwrap_or(g));
     }
     // An image that can't be made leaves the object as it is (the writer reports its effects).
     let image = raster_image(out, n, below, false)?;
     let mut v = n.clone();
     strip_raster(&mut v, false);
     let mut m = if below {
-        let mut m = walk(out, &v).unwrap_or(v);
+        let mut m = walk(px, out, &v).unwrap_or(v);
         put_below(out, &mut m, image);
         m
     } else {
         replace_with_image(v, image)
     };
-    walk_mask(out, &mut m);
+    walk_mask(px, out, &mut m);
     Some(m)
 }
 
 /// `nodes` with their raster effects as images, `None` when none has any.
-fn walk_all(out: &mut Document, nodes: &[Arc<Node>]) -> Option<Vec<Arc<Node>>> {
-    nodes.iter().any(|n| needs(n)).then(|| nodes.iter().map(|n| walk(out, n).map(Arc::new).unwrap_or_else(|| n.clone())).collect())
+fn walk_all(px: bool, out: &mut Document, nodes: &[Arc<Node>]) -> Option<Vec<Arc<Node>>> {
+    nodes.iter().any(|n| needs(px, n)).then(|| nodes.iter().map(|n| walk(px, out, n).map(Arc::new).unwrap_or_else(|| n.clone())).collect())
 }
 
 /// A copy of `doc` with raster effects turned into images at the document's raster effects
@@ -406,26 +406,45 @@ fn walk_all(out: &mut Document, nodes: &[Arc<Node>]) -> Option<Vec<Arc<Node>>> {
 /// type, images, symbol instances, live objects) and on single fills and strokes, in the layers,
 /// opacity masks, symbol definitions and pattern tiles.
 pub fn flatten_raster_effects(doc: &Document) -> Option<Document> {
-    let any = |nodes: &[Arc<Node>]| nodes.iter().any(|n| needs(n));
-    if !any(&doc.layers) && !doc.symbols.iter().any(|s| needs(&s.art)) && !doc.patterns.iter().any(|p| any(&p.art)) {
+    flatten(doc, false)
+}
+
+/// Like [`flatten_raster_effects`] for the objects with raster filter effects (PhotoCraft's
+/// filters: blurs, distortions, the gallery's…) only, for writers that draw the other raster
+/// effects themselves (SVG filters). Such an object becomes an image of all its effects; the
+/// geometry effects elsewhere stay live.
+pub fn flatten_raster_filters(doc: &Document) -> Option<Document> {
+    flatten(doc, true)
+}
+
+/// Has `n` raster effects to flatten (`px`: raster filters only)?
+fn has_fx(px: bool, n: &Node) -> bool {
+    let fx = raster_fx(n);
+    if px { fx.iter().any(|f| matches!(f, RasterFx::Pixel(_))) } else { !fx.is_empty() }
+}
+
+fn flatten(doc: &Document, px: bool) -> Option<Document> {
+    let any = |nodes: &[Arc<Node>]| nodes.iter().any(|n| needs(px, n));
+    if !any(&doc.layers) && !doc.symbols.iter().any(|s| needs(px, &s.art)) && !doc.patterns.iter().any(|p| any(&p.art)) {
         return None;
     }
-    // Geometry effects first, so the vector objects kept above shadows are final.
-    let baked = effects::bake_document(doc);
+    // Geometry effects first, so the vector objects kept above shadows are final (writers that
+    // keep raster effects live keep the geometry effects live too).
+    let baked = if px { None } else { effects::bake_document(doc) };
     let src = baked.as_ref().unwrap_or(doc);
     let mut out = src.clone();
-    if let Some(layers) = walk_all(&mut out, &src.layers) {
+    if let Some(layers) = walk_all(px, &mut out, &src.layers) {
         out.layers = layers;
     }
     for i in 0..out.symbols.len() {
-        if let Some(art) = out.symbols.get(i).map(|s| s.art.clone()).and_then(|a| walk(&mut out, &a))
+        if let Some(art) = out.symbols.get(i).map(|s| s.art.clone()).and_then(|a| walk(px, &mut out, &a))
             && let Some(s) = out.symbols.get_mut(i)
         {
             s.art = Arc::new(art);
         }
     }
     for i in 0..out.patterns.len() {
-        if let Some(art) = out.patterns.get(i).map(|p| p.art.clone()).and_then(|a| walk_all(&mut out, &a))
+        if let Some(art) = out.patterns.get(i).map(|p| p.art.clone()).and_then(|a| walk_all(px, &mut out, &a))
             && let Some(p) = out.patterns.get_mut(i)
         {
             p.art = art;
@@ -484,5 +503,53 @@ mod tests {
         assert!(text.contains("/Image"), "the PDF embeds the effect images");
         // The source document is untouched.
         assert!(s.doc().unwrap().doc.node(vectorcraft_doc::NodeId(r)).unwrap().appearance.effects.len() == 1);
+    }
+
+    #[test]
+    fn raster_filters_validate_and_export_as_images() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({"width": 300, "height": 300})).unwrap();
+        let r = s.execute("shape.rectangle", &json!({"x": 50, "y": 50, "width": 100, "height": 100})).unwrap()["id"].as_u64().unwrap();
+        let e = s.execute("shape.ellipse", &json!({"x": 180, "y": 50, "width": 80, "height": 80})).unwrap()["id"].as_u64().unwrap();
+        // Bad parameters are errors that change nothing.
+        assert!(s.execute("effect.apply", &json!({"effect": "distort.wave", "params": {"type": "zigzag"}, "ids": [r]})).is_err());
+        assert!(s.execute("effect.apply", &json!({"effect": "blur.motion", "params": {"distance": "far"}, "ids": [r]})).is_err());
+        let fx = |s: &Session, id: u64| s.doc().unwrap().doc.node(vectorcraft_doc::NodeId(id)).unwrap().appearance.effects.clone();
+        assert!(fx(&s, r).is_empty());
+        s.execute("effect.apply", &json!({"effect": "distort.twirl", "params": {"angle": 90}, "ids": [r]})).unwrap();
+        assert!(s.execute("effect.setParams", &json!({"index": 0, "params": {"angle": "x"}, "ids": [r]})).is_err());
+        assert_eq!(fx(&s, r)[0].params["angle"], json!(90));
+        s.execute("effect.setParams", &json!({"index": 0, "params": {"angle": 120}, "ids": [r]})).unwrap();
+        assert_eq!(fx(&s, r)[0].params["angle"], json!(120));
+        s.execute("effect.apply", &json!({"effect": "stylize.dropShadow", "ids": [e]})).unwrap();
+        let doc = s.doc().unwrap().doc.clone();
+        // SVG: the filtered object becomes an embedded image, the shadow stays an SVG filter.
+        let flat = super::flatten_raster_filters(&doc).unwrap();
+        let kids = flat.layers[0].children().unwrap();
+        assert!(matches!(kids[0].kind, NodeKind::Image(_)), "{}", kids[0].kind_label());
+        assert!(kids[1].path_data().is_some() && kids[1].appearance.effects.len() == 1);
+        let svg = vectorcraft_svg::export(&flat, &Default::default());
+        assert!(svg.contains("<image") && svg.contains("data:image/png;base64,"), "embedded raster");
+        assert!(svg.contains("<feGaussianBlur"), "the shadow is a filter");
+        // Nothing to do without raster filters.
+        let mut plain: vectorcraft_doc::Document = (*doc).clone();
+        plain.layers = plain
+            .layers
+            .iter()
+            .map(|l| {
+                let mut l = l.clone();
+                super::strip_raster(std::sync::Arc::make_mut(&mut l), true);
+                l
+            })
+            .collect();
+        assert!(super::flatten_raster_filters(&plain).is_none());
+        // PDF: images, no "left out" warning.
+        let rep = super::export_pdf_with_report(&doc, &Default::default()).unwrap();
+        assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+        assert!(String::from_utf8_lossy(&rep.bytes).contains("/Image"));
+        // The clipboard's SVG flavour embeds it too.
+        s.execute("select.set", &json!({"ids": [r]})).unwrap();
+        s.execute("edit.copy", &json!({})).unwrap();
+        assert!(s.clipboard_svg().unwrap().contains("<image"));
     }
 }

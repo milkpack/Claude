@@ -34,6 +34,7 @@ vectorcraft-eps = { path = "crates/eps" }
 vectorcraft-metafile = { path = "crates/metafile" }
 vectorcraft-plugins = { path = "crates/plugins" }
 vectorcraft-collab = { path = "crates/collab" }
+vectorcraft-procedural = { path = "crates/procedural" }
 
 # collaboration (Yjs-compatible CRDT and its sync protocol)
 yrs = { version = "0.28", features = ["sync"] }
@@ -54,6 +55,15 @@ socket2 = "0.6"
 wasmi = { version = "2.0.0", default-features = false, features = ["std", "validate", "stable", "portable-dispatch"] }
 # Tests: WebAssembly text -> binary for the plug-in fixtures (Apache-2.0 WITH LLVM-exception).
 wat = "1.228"
+
+# PhotoCraft's CPU image filters (sibling app by the same authors, MIT OR Apache-2.0), pinned to
+# one commit: the raster effects of Effect › Blur, Distort, Noise, Pixelate, Render, Sharpen,
+# Stylize, Video, Other and the gallery filters (see NOTICE, docs/photocraft-effects.md). The
+# crates use rayon on native targets only; wasm builds run them single-threaded.
+photocraft-algo = { git = "https://github.com/storytold/photocraft", rev = "44bf13e8903316d17291216adadc15fc357cb875" }
+photocraft-raster = { git = "https://github.com/storytold/photocraft", rev = "44bf13e8903316d17291216adadc15fc357cb875" }
+photocraft-geom = { git = "https://github.com/storytold/photocraft", rev = "44bf13e8903316d17291216adadc15fc357cb875" }
+photocraft-color = { git = "https://github.com/storytold/photocraft", rev = "44bf13e8903316d17291216adadc15fc357cb875" }
 
 # rendering / formats
 vello_cpu = "0.2"

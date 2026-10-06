@@ -62,6 +62,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("plugins", Class::Layer(2)),
     ("collab", Class::Layer(2)),
     ("collab-server", Class::Exempt),
+    ("procedural", Class::Layer(2)),
 ];
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
@@ -69,8 +70,15 @@ pub const TABLE: &[(&str, Class)] = &[
 /// `geom`, which the §3 diagram draws on one line. The GPU backend (`gpu`)
 /// reuses the CPU reference (`compose`) for LUTs and parity tests. EPS previews use the renderer's
 /// TIFF writer. Live effects run effect plug-ins.
-pub const INTRA_LAYER_ORDER: &[&[&str]] =
-    &[&["geom", "color"], &["pathops", "effects"], &["pathops", "trace"], &["text", "effects"], &["render", "eps"], &["plugins", "effects"]];
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[
+    &["geom", "color"],
+    &["pathops", "effects"],
+    &["pathops", "trace"],
+    &["text", "effects"],
+    &["render", "eps"],
+    &["plugins", "effects"],
+    &["pathops", "procedural"],
+];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));

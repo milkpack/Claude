@@ -16,6 +16,13 @@ vectorcraft-text = { workspace = true }
 vectorcraft-plugins = { workspace = true }
 kurbo = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
+# Raster effects run PhotoCraft's filters (see `pixel`).
+photocraft-algo = { workspace = true }
+photocraft-raster = { workspace = true }
+photocraft-geom = { workspace = true }
+photocraft-color = { workspace = true }
 
 [dev-dependencies]
 vectorcraft-color = { workspace = true }
+proptest = { workspace = true }

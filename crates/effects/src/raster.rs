@@ -5,6 +5,7 @@ use vectorcraft_doc::Effect;
 use vectorcraft_doc::color::{BlendMode, Color};
 
 use crate::merged_params;
+use crate::pixel::PixelFx;
 use crate::util::*;
 
 /// A painted effect, in document units. `blur` is Illustrator's blur distance; the renderer uses
@@ -40,6 +41,9 @@ pub enum RasterFx {
     GaussianBlur {
         radius: f64,
     },
+    /// A PhotoCraft image filter run on the object's pixels (see [`crate::pixel`]): the art (with
+    /// the raster effects before it) is replaced by the filtered pixels.
+    Pixel(PixelFx),
 }
 
 impl RasterFx {
@@ -54,6 +58,7 @@ impl RasterFx {
             RasterFx::OuterGlow { blur, .. } => 1.5 * blur,
             RasterFx::InnerGlow { .. } | RasterFx::Feather { .. } => 0.0,
             RasterFx::GaussianBlur { radius } => 1.5 * radius,
+            RasterFx::Pixel(p) => p.outset(),
         }
     }
 }
@@ -87,6 +92,10 @@ pub fn raster_effects(effects: &[Effect]) -> Vec<RasterFx> {
         .iter()
         .filter(|e| e.visible)
         .filter_map(|e| {
+            if let Some(fx) = PixelFx::new(&e.id, &e.params) {
+                // Invalid parameters leave the art as it is (commands reject them up front).
+                return fx.filter(1.0).is_ok().then_some(RasterFx::Pixel(fx));
+            }
             let p = merged_params(&e.id, &e.params);
             let blur = num(&p, "blur", 5.0).clamp(0.0, 1000.0);
             Some(match e.id.as_str() {
@@ -120,7 +129,11 @@ pub fn raster_effects(effects: &[Effect]) -> Vec<RasterFx> {
 }
 
 /// How far the visible raster effects of `effects` paint beyond the (effected) geometry, in
-/// document units. Geometry effects are accounted for by evaluating them.
+/// document units. Geometry effects are accounted for by evaluating them. Raster filters spread
+/// what the effects before them painted, so their reaches add up.
 pub fn outset(effects: &[Effect]) -> f64 {
-    raster_effects(effects).iter().map(RasterFx::outset).fold(0.0, f64::max)
+    let fx = raster_effects(effects);
+    let others = fx.iter().filter(|x| !matches!(x, RasterFx::Pixel(_))).map(RasterFx::outset).fold(0.0, f64::max);
+    let filters: f64 = fx.iter().filter(|x| matches!(x, RasterFx::Pixel(_))).map(RasterFx::outset).sum();
+    others + filters
 }

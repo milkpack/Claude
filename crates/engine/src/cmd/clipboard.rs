@@ -167,6 +167,8 @@ impl Session {
             return None;
         }
         let d = self.clipboard.to_document();
+        // Raster filter effects as embedded images (SVG has no filter for them).
+        let d = crate::cmd::rasterfx::flatten_raster_filters(&d).unwrap_or(d);
         Some(vectorcraft_svg::export(
             &d,
             &vectorcraft_svg::ExportOptions { artboard: None, object_ids: vectorcraft_svg::ObjectIds::Minimal, ..Default::default() },

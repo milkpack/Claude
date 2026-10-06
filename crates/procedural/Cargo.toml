@@ -1,0 +1,24 @@
+[package]
+name = "vectorcraft-procedural"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VectorCraft procedural generation: the node-graph evaluator behind procedural objects (Graphite-style)"
+
+[lints]
+workspace = true
+
+[dependencies]
+vectorcraft-geom = { workspace = true }
+vectorcraft-color = { workspace = true }
+vectorcraft-doc = { workspace = true }
+vectorcraft-pathops = { workspace = true }
+kurbo = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Pure-Rust libm (MIT): the same sin/cos/atan2 bits on every platform and on wasm, so a graph and
+# its seed give bit-identical art everywhere.
+libm = "0.2.16"
+
+[dev-dependencies]
+proptest = { workspace = true }

@@ -7,7 +7,9 @@
 //!   Warp) rewrite a path: [`apply_geometry`] evaluates them in stack order.
 //! - **Raster effects** (Drop Shadow, Inner/Outer Glow, Feather, Gaussian Blur) are described by
 //!   [`raster_effects`] and painted by the renderer; [`outset`] says how far they reach beyond
-//!   the geometry.
+//!   the geometry. The image filters of Effect › Raster Effects (blurs, sharpen, noise, pixelate,
+//!   render, stylize, distort, video, the gallery's artistic filters…) are PhotoCraft's
+//!   (`photocraft-algo`), run on the object's pixels by the renderer ([`pixel`]).
 //! - **Stroke geometry** ([`stroke`]): arrowheads, dash patterns and width profiles, shared by the
 //!   renderer, the exporters and Outline Stroke.
 //! - [`effect_catalog`] lists every effect with its menu path, parameter documentation and the
@@ -36,6 +38,7 @@ mod distort;
 mod group;
 mod live;
 mod marks;
+pub mod pixel;
 mod raster;
 mod reshape;
 pub mod stroke;
@@ -45,6 +48,8 @@ mod warp;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_pixel;
 #[cfg(test)]
 mod tests_scale;
 
@@ -61,6 +66,7 @@ pub use group::{
 };
 pub use live::{expand_live, expand_live_deep, expanded_live_group, text_outliner};
 pub use marks::{CROP_MARKS, crop_marks_art, has_crop_marks};
+pub use pixel::{PixelFx, check_params, is_pixel};
 pub use raster::{RasterFx, outset, raster_effects};
 pub use reshape::{expand_outlined, needs_outline, outline_art, outline_text, reshape};
 pub use warp::{WarpStyle, warp_point};
@@ -122,7 +128,7 @@ fn lengths_of(id: &str) -> Lengths {
         "stylize.scribble" => always(&["overlap", "strokeWidth", "spacing", "variation"]),
         "stylize.dropShadow" => always(&["x", "y", "blur"]),
         "stylize.innerGlow" | "stylize.outerGlow" => always(&["blur"]),
-        _ => Lengths::default(),
+        _ => pixel::pixel_def(id).map(|d| always(d.lengths)).unwrap_or_default(),
     }
 }
 
@@ -330,6 +336,10 @@ pub fn effect_catalog() -> Vec<EffectInfo> {
         };
         v.push(g(id, label, WARP, WARP_DOC, json!({"bend": 50.0, "horizontal": 0.0, "vertical": 0.0, "orientation": "horizontal"})));
     }
+    for d in pixel::pixel_defs() {
+        let defaults = serde_json::from_str(d.defaults).unwrap_or_else(|_| json!({}));
+        v.push(r(d.id, d.label, d.menu, d.params, defaults));
+    }
     for (id, label, _) in PATHFINDER_EFFECTS {
         v.push(g(id, label, PATHFINDER, "{} (groups and layers: live Pathfinder over the members)", json!({})));
     }
@@ -427,7 +437,7 @@ pub fn scale_effect(e: &mut Effect, s: f64) {
 
 /// Is `id` a raster (painted) effect?
 pub fn is_raster(id: &str) -> bool {
-    matches!(id, "stylize.dropShadow" | "stylize.innerGlow" | "stylize.outerGlow" | "stylize.feather" | "blur.gaussian")
+    matches!(id, "stylize.dropShadow" | "stylize.innerGlow" | "stylize.outerGlow" | "stylize.feather" | "blur.gaussian") || is_pixel(id)
 }
 
 /// Does `id` change geometry? (Crop Marks adds art of its own instead, [`crop_marks_art`]; colour
