@@ -312,6 +312,12 @@ pub struct UiState {
     pub collab_name: String,
     #[serde(default)]
     pub collab_server: String,
+    /// View › Hide Collaborators' Cursors: the others' pointers aren't drawn (their selections are).
+    #[serde(default)]
+    pub collab_hide_cursors: bool,
+    /// Share / Collaborate › Share My Cursor off: the others don't see our pointer.
+    #[serde(default)]
+    pub collab_private_cursor: bool,
 }
 
 /// The desktop window's geometry, kept across launches.
@@ -391,6 +397,8 @@ impl Default for UiState {
             window: None,
             collab_name: String::new(),
             collab_server: String::new(),
+            collab_hide_cursors: false,
+            collab_private_cursor: false,
         }
     }
 }

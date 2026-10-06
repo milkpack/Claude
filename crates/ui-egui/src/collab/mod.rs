@@ -252,7 +252,7 @@ pub fn status(app: &VectorcraftApp) -> Value {
 
 /// Once per frame: deliver what arrived, sync the document, send what the engine has to say.
 pub fn frame(app: &mut VectorcraftApp, ctx: &egui::Context) {
-    let VectorcraftApp { collab: state, session, hover_doc, .. } = app;
+    let VectorcraftApp { collab: state, session, hover_doc, ui: prefs, .. } = app;
     let Some(cs) = state.session.as_mut() else { return };
     if cs.socket.is_none() {
         cs.socket = Some(match state.connector.as_mut() {
@@ -285,8 +285,8 @@ pub fn frame(app: &mut VectorcraftApp, ctx: &egui::Context) {
             Event::Error(e) => cs.error = Some(e),
         }
     }
-    // Our pointer is shared only over the shared document.
-    let pointer = (*hover_doc).filter(|_| session.active().is_some_and(|d| d.uid == cs.collab.doc_uid));
+    // Our pointer is shared only over the shared document, and not at all while kept private.
+    let pointer = (*hover_doc).filter(|_| !prefs.collab_private_cursor && session.active().is_some_and(|d| d.uid == cs.collab.doc_uid));
     let (report, out) = cs.collab.tick(session, pointer);
     cs.send_all(out);
     if cs.status == Status::Syncing && cs.collab.is_joined() && cs.collab.conn.is_synced() {
@@ -321,6 +321,16 @@ pub fn run_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<Resu
             }
         }
         "collab.status" => Ok(status(app)),
+        "collab.showCursors" => {
+            let show = p.get("show").and_then(Value::as_bool).unwrap_or(app.ui.collab_hide_cursors);
+            app.ui.collab_hide_cursors = !show;
+            Ok(json!({ "show": show }))
+        }
+        "collab.shareCursor" => {
+            let share = p.get("share").and_then(Value::as_bool).unwrap_or(app.ui.collab_private_cursor);
+            app.ui.collab_private_cursor = !share;
+            Ok(json!({ "share": share }))
+        }
         _ => return None,
     })
 }

@@ -273,7 +273,7 @@ fn share_dialog_joins_and_shows_the_room() {
 
 #[test]
 fn every_collab_command_is_registered_and_in_the_file_menu() {
-    for id in ["collab.share", "collab.join", "collab.leave", "collab.status"] {
+    for id in ["collab.share", "collab.join", "collab.leave", "collab.status", "collab.showCursors", "collab.shareCursor"] {
         assert!(menus::UI_COMMANDS.iter().any(|c| c.0 == id), "{id}");
     }
     let tree = menus::menu_tree();
@@ -317,27 +317,64 @@ fn canvas_draws_the_others() {
     relay.pump(&mut [&mut a, &mut b], &ctx);
     // A full frame with the canvas, the status strip and B's pointer and selection.
     let input = || egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))), ..Default::default() };
-    let mut texts = vec![];
-    for _ in 0..3 {
-        let mut out = ctx.run_ui(input(), |ui| {
-            a.logic(ui.ctx());
-            a.ui(ui);
-        });
-        out.textures_delta.clear();
-        texts = out
-            .shapes
-            .iter()
-            .filter_map(|c| match &c.shape {
-                egui::Shape::Text(t) => Some(t.galley.text().to_string()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-    }
+    let texts_of = |a: &mut VectorcraftApp| {
+        let mut texts = vec![];
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(input(), |ui| {
+                a.logic(ui.ctx());
+                a.ui(ui);
+            });
+            out.textures_delta.clear();
+            texts = out
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+        }
+        texts
+    };
+    let texts = texts_of(&mut a);
     assert!(!a.ui.status.contains("Internal error"), "{}", a.ui.status);
     assert_eq!(peers(&a)[0].cursor, Some([20.0, 15.0]));
     // B's name tag is on the canvas, the status strip says the session is live.
     assert!(texts.iter().any(|t| t == "Bo"), "{texts:?}");
     assert!(texts.iter().any(|t| t == "Live"), "{texts:?}");
+
+    // View › Hide Collaborators' Cursors: B's pointer (and its name tag) is no longer drawn.
+    assert_eq!(menus::checked(&a, "collab.showCursors", &json!({})), Some(true));
+    a.run("collab.showCursors", json!({})).unwrap();
+    assert_eq!(menus::checked(&a, "collab.showCursors", &json!({})), Some(false));
+    let texts = texts_of(&mut a);
+    assert!(!texts.iter().any(|t| t == "Bo"), "{texts:?}");
+    a.run("collab.showCursors", json!({"show": true})).unwrap();
+    assert!(texts_of(&mut a).iter().any(|t| t == "Bo"));
+}
+
+#[test]
+fn a_private_cursor_is_not_shared() {
+    let ctx = egui::Context::default();
+    let mut relay = Relay::new();
+    let mut a = app_with(&relay);
+    let mut b = app_with(&relay);
+    a.run("file.new", json!({})).unwrap();
+    a.run("collab.join", json!({"room": "r4", "server": "ws://h"})).unwrap();
+    relay.pump(&mut [&mut a], &ctx);
+    b.run("collab.join", json!({"room": "r4", "server": "ws://h", "name": "Bo"})).unwrap();
+    b.hover_doc = Some(Point::new(3.0, 4.0));
+    relay.pump(&mut [&mut a, &mut b], &ctx);
+    assert_eq!(peers(&a)[0].cursor, Some([3.0, 4.0]));
+    // B keeps the pointer private: A sees B, but no pointer.
+    assert_eq!(b.run("collab.shareCursor", json!({})).unwrap(), json!({"share": false}));
+    assert_eq!(menus::checked(&b, "collab.shareCursor", &json!({})), Some(false));
+    relay.pump(&mut [&mut a, &mut b], &ctx);
+    let seen = peers(&a);
+    assert_eq!((seen[0].name.as_str(), seen[0].cursor), ("Bo", None));
+    b.run("collab.shareCursor", json!({"share": true})).unwrap();
+    relay.pump(&mut [&mut a, &mut b], &ctx);
+    assert_eq!(peers(&a)[0].cursor, Some([3.0, 4.0]));
 }
 
 /// Two apps through a real `vectorcraft-collab-server` and the platform socket. Runs when

@@ -96,6 +96,15 @@ fn body(app: &mut VectorcraftApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
                 ui.label(egui::RichText::new(name).color(t.text));
             });
         }
+        ui.add_space(8.0);
+        let mut show = !app.ui.collab_hide_cursors;
+        if ui.checkbox(&mut show, "Show the others' cursors").changed() {
+            let _ = app.run("collab.showCursors", json!({ "show": show }));
+        }
+        let mut share = !app.ui.collab_private_cursor;
+        if ui.checkbox(&mut share, "Share my cursor").changed() {
+            let _ = app.run("collab.shareCursor", json!({ "share": share }));
+        }
         ui.add_space(10.0);
         if widgets::secondary_button(ui, "Stop Collaborating").clicked() {
             let _ = app.run("collab.leave", json!({}));

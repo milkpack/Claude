@@ -32,6 +32,9 @@ pub fn paint_peers(app: &VectorcraftApp, painter: &egui::Painter, xf: &Xf) {
             }
         }
     }
+    if app.ui.collab_hide_cursors {
+        return;
+    }
     let clip = painter.clip_rect();
     for (_, p) in &peers {
         if let Some(at) = cursor_screen(p, xf).filter(|at| clip.expand(4.0).contains(*at)) {
