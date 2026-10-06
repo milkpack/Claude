@@ -61,7 +61,31 @@ curl -fsSL --max-time 30 "$REPO_RAW/docker-compose.yml" -o "$DIR/docker-compose.
   die "не удалось скачать docker-compose.yml с raw.githubusercontent.com"
 printf 'DOMAIN=%s\nIMAGE=%s\n' "$DOMAIN" "$IMAGE" > "$DIR/.env"
 # Caddy runs on the host and proxies to the app on 127.0.0.1:1234 (HTTPS certificate included).
-printf '%s {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:1234\n}\n' "$DOMAIN" > /etc/caddy/Caddyfile
+# The web app is a ~40 MB .wasm: compress it (Caddy leaves application/wasm alone by default) and
+# let browsers keep the hashed build files for good, so it downloads once per release.
+cat > /etc/caddy/Caddyfile <<EOF
+$DOMAIN {
+	encode {
+		zstd
+		gzip 6
+		match {
+			header Content-Type application/wasm*
+			header Content-Type text/*
+			header Content-Type application/javascript*
+			header Content-Type application/json*
+			header Content-Type image/svg+xml*
+		}
+	}
+	@hashed path_regexp \-[0-9a-f]{12,}(_bg)?\.(wasm|js)$
+	header @hashed {
+		Cache-Control "public, max-age=31536000, immutable"
+		defer
+	}
+	reverse_proxy 127.0.0.1:1234
+}
+EOF
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 ||
+  die "Caddyfile не прошёл проверку: caddy validate --config /etc/caddy/Caddyfile"
 
 say "Файрвол (SSH, HTTP, HTTPS)"
 ufw allow OpenSSH >/dev/null
