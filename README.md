@@ -58,6 +58,21 @@
   <a href="#license-and-credits">License</a>
 </p>
 
+## VectorCraft Cloud: совместная работа как в Figma
+
+Этот форк добавляет к VectorCraft **совместное редактирование в реальном времени**. Несколько
+человек работают в одном документе одновременно и видят курсоры и выделения друг друга. Правки
+сливаются через CRDT (совместимый с Yjs), а Undo отменяет только ваши собственные шаги.
+
+```sh
+# сервер (комнаты + хранение), вместе с веб-версией:
+docker compose -f packaging/collab/docker-compose.yml up -d --build
+# у каждого участника: http://<сервер>:1234/?room=poster
+```
+
+Устройство, протокол, сервер и тесты описаны в [docs/collab.md](docs/collab.md). Основа:
+[storytold/vectorcraft@2e2bb33](https://github.com/storytold/vectorcraft/commit/2e2bb33909ff004316e33f495704fe714f023131).
+
 ## A look around
 
 <table>

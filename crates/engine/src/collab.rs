@@ -15,13 +15,13 @@
 
 use std::sync::Arc;
 
-use vectorcraft_collab::{Connection, PeerState};
+use vectorcraft_collab::PeerState;
 use vectorcraft_doc::{Document, NodeId};
 use vectorcraft_geom::Point;
 
 use crate::{DocState, Session, SharedHistory};
 
-pub use vectorcraft_collab::{Clock, PEER_COLORS, PeerState as Peer, SharedDoc};
+pub use vectorcraft_collab::{Clock, Connection, PEER_COLORS, PeerState as Peer, SharedDoc};
 
 /// What a tick did.
 #[derive(Clone, Debug, Default, PartialEq)]
