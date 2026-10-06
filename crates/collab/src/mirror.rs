@@ -20,7 +20,8 @@ use vectorcraft_doc::{Document, ImageBlob, Node, NodeId, NodeKind};
 use yrs::types::{DeepObservable, Event, PathSegment};
 use yrs::undo::Options as UndoOptions;
 use yrs::updates::decoder::Decode;
-use yrs::{Any, Doc, Map, MapPrelim, MapRef, Origin, Out, ReadTxn, StateVector, Transact, UndoManager, Update};
+use yrs::updates::encoder::Encode;
+use yrs::{Any, Doc, Map, MapPrelim, MapRef, Origin, Out, ReadTxn, StateVector, Transact, UndoManager, Update, WriteTxn};
 
 use crate::order;
 
@@ -28,11 +29,17 @@ use crate::order;
 const LOCAL: &str = "vectorcraft-local";
 /// Origin of updates applied from the network.
 const REMOTE: &str = "vectorcraft-remote";
+/// Origin of the fields [`SharedDoc::materialize`] puts back into an object Undo restored
+/// incomplete. Not undoable, and the caches already hold what it writes.
+const REPAIR: &str = "vectorcraft-repair";
 
 /// Ids each participant allocates from: `[slot << ID_SHIFT, (slot + 1) << ID_SHIFT)`, slot ≥ 1, all
 /// below 2^53 so they survive a trip through a JavaScript number.
 const ID_SHIFT: u32 = 32;
 const ID_SLOTS: u64 = (1 << (53 - ID_SHIFT)) - 1;
+
+/// Remote updates kept waiting for a gap to fill (input is untrusted: this caps the memory).
+const MAX_HELD: usize = 1024;
 
 const PARENT: &str = "p";
 const ORDER: &str = "o";
@@ -184,6 +191,11 @@ pub struct SharedDoc {
     id_range: (u64, u64),
     next_id: u64,
     outbox: Vec<Vec<u8>>,
+    /// Remote updates waiting for earlier ones from the same participant (see `apply_update`).
+    held: Vec<Vec<u8>>,
+    /// Deleted objects as last seen (without the parsed node), to repair one Undo brings back
+    /// incomplete (see `materialize`).
+    graveyard: HashMap<NodeId, RawNode>,
 }
 
 impl std::fmt::Debug for SharedDoc {
@@ -201,12 +213,12 @@ impl Default for SharedDoc {
 impl SharedDoc {
     /// A new, empty replica with a random client id.
     pub fn new() -> Self {
-        Self::with_doc(Doc::new())
+        Self::with_doc(Doc::with_options(options(None)))
     }
 
     /// A replica with a fixed client id (< 2^53; tests and reproducible runs).
     pub fn with_client_id(id: u64) -> Self {
-        Self::with_doc(Doc::with_client_id(id & ((1 << 53) - 1)))
+        Self::with_doc(Doc::with_options(options(Some(id & ((1 << 53) - 1)))))
     }
 
     fn with_doc(ydoc: Doc) -> Self {
@@ -252,6 +264,8 @@ impl SharedDoc {
             id_range: (start, start + (1 << ID_SHIFT)),
             next_id: start,
             outbox: vec![],
+            held: vec![],
+            graveyard: HashMap::new(),
         }
     }
 
@@ -291,7 +305,6 @@ impl SharedDoc {
     }
 
     pub fn state_vector(&self) -> Vec<u8> {
-        use yrs::updates::encoder::Encode;
         self.ydoc.transact().state_vector().encode_v1()
     }
 
@@ -306,16 +319,72 @@ impl SharedDoc {
     }
 
     /// Apply an update from another participant. The document changes on the next
-    /// [`SharedDoc::materialize`].
+    /// [`SharedDoc::materialize`]. Updates may arrive in any order: one that needs updates not
+    /// received yet waits for them.
     pub fn apply_update(&mut self, update: &[u8]) -> Result<(), CollabError> {
-        let update = Update::decode_v1(update).map_err(|e| CollabError::BadUpdate(e.to_string()))?;
-        let mut txn = self.ydoc.transact_mut_with(REMOTE);
-        txn.apply_update(update).map_err(|e| CollabError::BadUpdate(e.to_string()))?;
-        drop(txn);
-        if let Ok(mut t) = self.touched.lock() {
+        Update::decode_v1(update).map_err(|e| CollabError::BadUpdate(e.to_string()))?;
+        // Integrate updates in causal order, keeping what can't be integrated yet here rather
+        // than in yrs. Updates from one participant can arrive out of order (a relay, a
+        // reconnect, a batch). yrs integrates a later block that has no dependencies right away
+        // and pads the gap with a skip; its retry of what waits in the gap compares clocks the
+        // skip already moved past, so those blocks stay pending (and out of every replica's
+        // state) for good, and replicas diverge. So an update that would leave a gap waits here
+        // until the updates before it arrive, and what yrs couldn't integrate for lack of
+        // another participant's blocks comes back here too, to be retried once anything new
+        // is integrated.
+        let mut waiting = std::mem::take(&mut self.held);
+        waiting.push(update.to_vec());
+        let mut stuck: Vec<Vec<u8>> = vec![];
+        let mut applied = false;
+        let mut result = Ok(());
+        loop {
+            let sv = self.ydoc.transact().state_vector();
+            let ready = waiting.iter().position(|u| Update::decode_v1(u).is_ok_and(|u| follows(&u, &sv)));
+            let next = if let Some(i) = ready {
+                Update::decode_v1(&waiting.remove(i)).ok()
+            } else if waiting.len() + stuck.len() > 1 {
+                // A batch can have a hole that other waiting updates fill: try them together.
+                let all = waiting.iter().chain(&stuck);
+                match yrs::merge_updates_v1(all).ok().and_then(|m| Update::decode_v1(&m).ok()) {
+                    Some(merged) if follows(&merged, &sv) => {
+                        waiting.clear();
+                        stuck.clear();
+                        Some(merged)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let Some(next) = next else { break };
+            let pending = {
+                let mut txn = self.ydoc.transact_mut_with(REMOTE);
+                if let Err(e) = txn.apply_update(next) {
+                    result = Err(CollabError::BadUpdate(e.to_string()));
+                }
+                txn.prune_pending()
+            };
+            applied = true;
+            let progress = self.ydoc.transact().state_vector() != sv;
+            if progress {
+                waiting.append(&mut stuck);
+            }
+            if let Some(p) = pending {
+                // Blocks waiting for another participant's: retry once something new arrives.
+                if progress { waiting.push(p.encode_v1()) } else { stuck.push(p.encode_v1()) }
+            }
+        }
+        waiting.append(&mut stuck);
+        if waiting.len() > MAX_HELD {
+            log::warn!("collab: {} updates wait for earlier ones; dropping the oldest", waiting.len());
+            let excess = waiting.len() - MAX_HELD;
+            waiting.drain(..excess);
+        }
+        self.held = waiting;
+        if applied && let Ok(mut t) = self.touched.lock() {
             t.remote = true;
         }
-        Ok(())
+        result
     }
 
     // ---------------------------------------------------------------- local → CRDT
@@ -343,6 +412,11 @@ impl SharedDoc {
             wrote = w;
         }
         self.tree = tree;
+        if self.synced.is_none() {
+            // Sharing the document isn't an edit: Undo right after it would empty the room for
+            // everyone.
+            self.undo.clear_all();
+        }
         self.synced = Some(doc.clone());
         if wrote {
             let update = self.ydoc.transact().encode_diff_v1(&before);
@@ -442,8 +516,14 @@ impl SharedDoc {
                 _ => {
                     let entries: Vec<(&str, Any)> = fields.iter().map(|(k, v)| (k.as_str(), Any::from(v.clone()))).collect();
                     self.nodes.insert(txn, key.as_str(), MapPrelim::from_iter(entries));
-                    // Parent and order follow below.
-                    self.raw.insert(*id, RawNode { parent: None, order: String::new(), ..RawNode::default() });
+                    // Parent and order follow below. An object re-created here (someone deleted
+                    // it while we edited it) leaves its old place among its siblings.
+                    if let Some(old) = self.raw.insert(*id, RawNode { parent: None, order: String::new(), ..RawNode::default() })
+                        && let Some(set) = self.kids.get_mut(&old.parent)
+                    {
+                        set.remove(&(old.order, *id));
+                    }
+                    self.graveyard.remove(id);
                     wrote = true;
                 }
             }
@@ -454,7 +534,11 @@ impl SharedDoc {
         }
         // Parents and stacking order.
         for (parent, list) in &tree.children {
-            if self.tree.children.get(parent) == Some(list) && list.iter().all(|id| self.raw.get(id).is_some_and(|r| r.parent == *parent)) {
+            // (An object (re)created above has no order key yet: a top-level one already has the
+            // right parent, `None`, so the key is what says it still needs writing.)
+            if self.tree.children.get(parent) == Some(list)
+                && list.iter().all(|id| self.raw.get(id).is_some_and(|r| r.parent == *parent && !r.order.is_empty()))
+            {
                 continue;
             }
             let old: Vec<Option<&str>> =
@@ -487,10 +571,12 @@ impl SharedDoc {
         let gone: Vec<NodeId> = self.tree.arcs.keys().filter(|id| !tree.arcs.contains_key(id)).copied().collect();
         for id in gone {
             self.nodes.remove(txn, &id_key(id));
-            if let Some(raw) = self.raw.remove(&id)
-                && let Some(set) = self.kids.get_mut(&raw.parent)
-            {
-                set.remove(&(raw.order, id));
+            if let Some(mut raw) = self.raw.remove(&id) {
+                if let Some(set) = self.kids.get_mut(&raw.parent) {
+                    set.remove(&(raw.order.clone(), id));
+                }
+                raw.node = None;
+                self.graveyard.insert(id, raw);
             }
             wrote = true;
         }
@@ -505,7 +591,9 @@ impl SharedDoc {
 
     /// Rebuild the document from the CRDT after remote changes (or an undo). `current` is the
     /// document being edited: unchanged subtrees and local-only state (Puppet Warp pins) carry
-    /// over from it. `None` when nothing changed since the last sync.
+    /// over from it. `None` when nothing changed since the last sync. When it has to repair an
+    /// object Undo brought back incomplete, the repair is queued for the others
+    /// ([`SharedDoc::take_outgoing`]).
     pub fn materialize(&mut self, current: &Arc<Document>) -> Option<Arc<Document>> {
         let touched = match self.touched.lock() {
             Ok(mut t) => std::mem::take(&mut *t),
@@ -550,24 +638,32 @@ impl SharedDoc {
         // Objects.
         let node_keys: Vec<String> = if first { self.nodes.keys(&txn).map(str::to_string).collect() } else { touched.nodes.into_iter().collect() };
         let mut dirty: HashSet<NodeId> = HashSet::new();
+        let mut repairs: Vec<(String, Vec<(String, String)>)> = vec![];
         for k in node_keys {
             let Some(id) = parse_id(&k) else { continue };
             let Some(Out::YMap(m)) = self.nodes.get(&txn, &k) else {
-                if let Some(raw) = self.raw.remove(&id) {
+                if let Some(mut raw) = self.raw.remove(&id) {
                     if let Some(set) = self.kids.get_mut(&raw.parent) {
-                        set.remove(&(raw.order, id));
+                        set.remove(&(raw.order.clone(), id));
+                    }
+                    if raw.node.take().is_some() {
+                        self.graveyard.insert(id, raw);
                     }
                     dirty.insert(id);
                 }
                 continue;
             };
             let mut parent = None;
+            let mut has_parent = false;
             let mut order = String::new();
             let mut fields = BTreeMap::new();
             for (key, value) in m.iter(&txn) {
                 let Out::Any(Any::String(s)) = value else { continue };
                 match key {
-                    PARENT => parent = parse_id(&s),
+                    PARENT => {
+                        parent = parse_id(&s);
+                        has_parent = true;
+                    }
                     ORDER => order = s.to_string(),
                     _ => {
                         fields.insert(key.to_string(), s.to_string());
@@ -575,9 +671,48 @@ impl SharedDoc {
                 }
             }
             let raw = self.raw.entry(id).or_default();
-            if raw.fields != fields || raw.node.is_none() {
-                if let Some(n) = parse_node(id, &fields) {
+            let changed = raw.fields != fields || raw.node.is_none();
+            let mut node = if changed { parse_node(id, &fields) } else { None };
+            // Undo that brings back a deleted object someone else edited meanwhile restores it
+            // without the entries they overwrote (Yjs doesn't redo a map entry another participant
+            // replaced): a field (and it no longer parses), its parent or its stacking order. Put
+            // back this replica's last version of what's missing and share that, so that every
+            // replica shows the object the same way (otherwise only the replicas that still had a
+            // good version would show it, each its own way).
+            if (changed && node.is_none()) || !has_parent || order.is_empty() {
+                let base = if raw.node.is_some() { Some(&*raw) } else { self.graveyard.get(&id) };
+                if let Some(base) = base.filter(|b| !b.order.is_empty()) {
+                    let mut put: Vec<(String, String)> = vec![];
+                    if changed && node.is_none() {
+                        let missing: Vec<(String, String)> =
+                            base.fields.iter().filter(|(f, _)| !fields.contains_key(*f)).map(|(f, v)| (f.clone(), v.clone())).collect();
+                        let mut whole = fields.clone();
+                        whole.extend(missing.iter().cloned());
+                        if !missing.is_empty()
+                            && let Some(n) = parse_node(id, &whole)
+                        {
+                            node = Some(n);
+                            fields = whole;
+                            put.extend(missing);
+                        }
+                    }
+                    if !has_parent {
+                        parent = base.parent;
+                        put.push((PARENT.to_string(), parent.map(id_key).unwrap_or_default()));
+                    }
+                    if order.is_empty() {
+                        order = base.order.clone();
+                        put.push((ORDER.to_string(), order.clone()));
+                    }
+                    if !put.is_empty() {
+                        repairs.push((k.clone(), put));
+                    }
+                }
+            }
+            if changed {
+                if let Some(n) = node {
                     raw.node = Some(n);
+                    self.graveyard.remove(&id);
                 }
                 raw.fields = fields;
                 dirty.insert(id);
@@ -593,8 +728,24 @@ impl SharedDoc {
             }
         }
         drop(txn);
+        if !repairs.is_empty() {
+            let before = self.ydoc.transact().state_vector();
+            {
+                let mut txn = self.ydoc.transact_mut_with(REPAIR);
+                for (k, missing) in &repairs {
+                    if let Some(Out::YMap(m)) = self.nodes.get(&txn, k) {
+                        for (f, v) in missing {
+                            m.insert(&mut txn, f.as_str(), v.as_str());
+                        }
+                    }
+                }
+            }
+            let update = self.ydoc.transact().encode_diff_v1(&before);
+            self.outbox.push(update);
+        }
 
-        let layers = self.build_layers(&dirty);
+        let mut synthetic = None;
+        let layers = self.build_layers(&dirty, &mut synthetic);
         let mut doc = if fields_changed { self.document_from_fields(current) } else { (**current).clone() };
         doc.layers = layers;
         doc.images = if images_changed { self.image_data.clone() } else { current.images.clone() };
@@ -603,6 +754,10 @@ impl SharedDoc {
         self.next_id = self.next_id.max(doc.peek_next_id());
         let doc = Arc::new(doc);
         self.tree = Tree::of(&doc);
+        if let Some(id) = synthetic {
+            // Not in the CRDT yet: the next publish writes it (and its objects' new parent).
+            self.tree.arcs.remove(&id);
+        }
         self.synced = Some(doc.clone());
         Some(doc)
     }
@@ -616,6 +771,13 @@ impl SharedDoc {
         }
         m.insert("layers".into(), Value::Array(vec![]));
         m.insert("next_id".into(), Value::from(1));
+        // A field the CRDT doesn't hold is at its default: fields are left out when they are
+        // (`skip_serializing_if`), so one set back to its default, or whose setting was undone,
+        // is removed. Taking it from `current` instead would keep the old value on every replica
+        // that had it, and differ from a replica that never did.
+        if let Ok(d) = serde_json::from_value::<Document>(Value::Object(m.clone())) {
+            return d;
+        }
         // Fields this version requires but the CRDT lacks (an empty room) come from `current`.
         let mut defaults = current.clone();
         defaults.layers.clear();
@@ -637,7 +799,8 @@ impl SharedDoc {
     /// The layer tree from the CRDT, reusing the last synced subtrees nothing in `dirty` touched.
     /// Objects whose parent is gone, isn't a container, or forms a cycle (concurrent moves) go to
     /// the end of the first layer, the same way on every replica.
-    fn build_layers(&self, dirty: &HashSet<NodeId>) -> Vec<Arc<Node>> {
+    /// `synthetic` is set to the id of a layer made up for objects left without one.
+    fn build_layers(&self, dirty: &HashSet<NodeId>, synthetic: &mut Option<NodeId>) -> Vec<Arc<Node>> {
         let is_layer = |id: &NodeId| self.raw.get(id).and_then(|r| r.node.as_ref()).is_some_and(|n| matches!(n.kind, NodeKind::Layer { .. }));
         // Top-level objects that aren't layers move into the first layer.
         let (top, strays): (Vec<NodeId>, Vec<NodeId>) = self.sorted_kids(None).into_iter().partition(is_layer);
@@ -682,8 +845,15 @@ impl SharedDoc {
         }
         if !loose.is_empty() {
             if built.is_empty() {
-                // No layer at all: give the strays one.
-                built.push(Arc::new(Node::layer(NodeId(self.next_id), "Layer 1", vectorcraft_doc::LayerColor::Preset(0))));
+                // No layer at all: give the strays one, with the same id on every replica (an id
+                // from this replica's range would differ from the others'), from the top of the
+                // pre-sharing range, which nobody allocates from while shared.
+                let mut id = (1u64 << ID_SHIFT) - 1;
+                while self.raw.contains_key(&NodeId(id)) && id > 1 {
+                    id -= 1;
+                }
+                *synthetic = Some(NodeId(id));
+                built.push(Arc::new(Node::layer(NodeId(id), "Layer 1", vectorcraft_doc::LayerColor::Preset(0))));
             }
             if let Some(first) = built.first_mut()
                 && let Some(kids) = container_mut(Arc::make_mut(first))
@@ -789,6 +959,36 @@ impl SharedDoc {
     }
 }
 
+/// Options for the replica's Yjs document: a random client id unless given, and no garbage
+/// collection. yrs frees a deleted map's contents when it collects it, but keeps the entries
+/// Undo still needs (`keep`) and leaves them pointing at the freed map: deleting an object that
+/// was recoloured and the recolour undone, then encoding the state (a late joiner's sync), reads
+/// freed memory and crashes. Without collection deleted values stay as tombstones with their
+/// content, which costs memory but nothing else: undo and sync behave the same.
+fn options(client_id: Option<u64>) -> yrs::Options {
+    let mut o = match client_id {
+        Some(id) => yrs::Options::with_client_id(yrs::block::ClientID::new(id)),
+        None => yrs::Options::default(),
+    };
+    o.skip_gc = true;
+    o
+}
+
+/// Whether `update` adds nothing beyond `sv` that leaves a gap: per participant, its blocks
+/// continue from the clock already integrated.
+fn follows(update: &Update, sv: &StateVector) -> bool {
+    update.insertions(true).iter().all(|(client, ranges)| {
+        let mut clock = sv.get(client);
+        ranges.iter().all(|r| {
+            if r.start > clock {
+                return false;
+            }
+            clock = clock.max(r.end);
+            true
+        })
+    })
+}
+
 /// The node without its children (what the CRDT stores of it).
 fn strip(n: &Node) -> Node {
     let mut s = n.clone();
@@ -801,8 +1001,9 @@ fn strip(n: &Node) -> Node {
 /// Record the top-level keys of `map` that any transaction touches.
 fn observe(map: &MapRef, key: &'static str, touched: Arc<Mutex<Touched>>, pick: fn(&mut Touched) -> &mut HashSet<String>) {
     map.observe_deep(key, move |txn, events| {
-        // `publish` keeps its caches itself; everything else (remote updates, undo) is re-read.
-        if txn.origin() == Some(&Origin::from(LOCAL)) {
+        // `publish` and repairs keep the caches themselves; everything else (remote updates, undo)
+        // is re-read.
+        if txn.origin().is_some_and(|o| *o == Origin::from(LOCAL) || *o == Origin::from(REPAIR)) {
             return;
         }
         let Ok(mut t) = touched.lock() else { return };
