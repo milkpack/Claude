@@ -1,0 +1,30 @@
+# Production stack: VectorCraft Cloud behind Caddy (automatic HTTPS).
+# Installed into /opt/vectorcraft by install.sh; settings come from .env next to this file.
+services:
+  vectorcraft:
+    image: ${IMAGE:-ghcr.io/milkpack/vectorcraft-cloud:latest}
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./data:/data
+    expose:
+      - "1234"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [vectorcraft]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

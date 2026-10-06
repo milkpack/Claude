@@ -1,0 +1,5 @@
+{$DOMAIN} {
+	encode zstd gzip
+	# WebSockets (/collab/<room>) and everything else go to the app; Caddy handles TLS.
+	reverse_proxy vectorcraft:1234
+}

@@ -3,7 +3,7 @@
 #   docker run -p 1234:1234 -v vc-data:/data vectorcraft-cloud
 # Then open http://localhost:1234/?room=team-poster in several browsers.
 
-FROM rust:1.97-bookworm AS build
+FROM rust:1-bookworm AS build
 WORKDIR /src
 RUN rustup target add wasm32-unknown-unknown \
  && cargo install trunk --locked
@@ -12,6 +12,8 @@ RUN cargo build --release -p vectorcraft-collab-server
 RUN cd apps/vectorcraft-web && trunk build --release
 
 FROM debian:bookworm-slim
+LABEL org.opencontainers.image.source="https://github.com/milkpack/Claude" \
+      org.opencontainers.image.description="VectorCraft Cloud: web app + collaboration server"
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/vectorcraft-collab-server /usr/local/bin/
 COPY --from=build /src/dist/web /srv/web
