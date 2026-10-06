@@ -1,5 +1,6 @@
-# Production stack: VectorCraft Cloud behind Caddy (automatic HTTPS).
-# Installed into /opt/vectorcraft by install.sh; settings come from .env next to this file.
+# Production stack: the VectorCraft Cloud container. Caddy (HTTPS) runs on the host from the
+# Ubuntu package and proxies to 127.0.0.1:1234. Installed into /opt/vectorcraft by install.sh;
+# settings come from .env next to this file.
 services:
   vectorcraft:
     image: ${IMAGE:-ghcr.io/milkpack/vectorcraft-cloud:latest}
@@ -8,23 +9,5 @@ services:
       RUST_LOG: info
     volumes:
       - ./data:/data
-    expose:
-      - "1234"
-
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    depends_on: [vectorcraft]
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-
-volumes:
-  caddy-data:
-  caddy-config:
+      - "127.0.0.1:1234:1234"
