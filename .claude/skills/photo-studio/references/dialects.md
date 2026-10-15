@@ -33,10 +33,12 @@ prompt must carry its full context, including the preserve list on edits.
   objects with high fidelity and up to 5 people; 2.1 and 2 take up to 10 objects and 4 people;
   2 Lite has no character slots, so don't use it for identity.
 - Aspect ratio: set it. Without one the model matches the input or falls back to 1:1.
-- Known tendencies (practitioners): clean, evenly lit, HDR-like "set" look on candid scenes,
-  so ask for motivated light, ordinary background clutter and visible texture; 2.1 can drift
-  pink/magenta over repeated edits, so restart from the source instead of editing outputs; 1K
-  softens fine product detail, so use 2K or 4K.
+- Known tendencies: in our blind lab Pro and 2.1 followed a specific light brief (on-camera flash,
+  wall shadow, warm practicals) better than any other model, but skin came out slightly too clean
+  at full size, so always ask for texture. On edits they regenerate the whole frame (small crop
+  and black-level shifts), so check the frame against the source. Practitioners report 2.1
+  drifting pink/magenta over repeated edits: restart from the source instead of editing outputs.
+  1K softens fine detail: use 2K or 4K.
 
 ## OpenAI GPT Image: 2, 2.5 Flare, 2.5 Sunburst
 
@@ -64,9 +66,12 @@ prompt must carry its full context, including the preserve list on edits.
 - Settings: `quality` "medium" for exploration, "high" for final portraits, identity edits and
   small text (about 5× the price; quote it). Sizes above 2560×1440 are experimental. Flare is
   faster; Sunburst is the quality and editing-precision tier.
-- Known tendencies (practitioners): the strongest "real photo" feel for candid and documentary
-  scenes; can look glossy on posed portraits; Sunburst re-renders more of the frame on small
-  edits than other editors (it keeps meaning, not pixels); weaker at exact product geometry.
+- Known tendencies (our blind lab, routing.md): GPT Image 2 can produce the most convincing
+  candid frame of all models but varies a lot between frames; Sunburst tends to soften or drop
+  specific light instructions (it ignored a hard flash shadow twice), so spell the light out and
+  check it; on precise edits Sunburst kept the rest of the frame nearly intact (second-lowest drift);
+  on identity in a new scene it pastes the reference face and expression, so describe the new
+  expression explicitly.
 
 ## ByteDance Seedream: 4.5, 5 Lite, 5 Pro
 
@@ -108,8 +113,8 @@ prompt must carry its full context, including the preserve list on edits.
 - Distorted faces come from people being too small in frame: frame closer.
 - References: up to 5; the first is the image being reworked and the prompt becomes an edit
   instruction. Keep the instruction short and say what changes.
-- Use for: posters, signage and packaging with exact lettering; small precise edits (practitioners
-  measured the least drift per edit).
+- Use for: posters, signage and packaging with exact lettering; small precise edits on photos
+  (lowest drift and cleanest change in our blind lab).
 
 ## Kling 3 Omni (image)
 

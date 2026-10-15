@@ -31,6 +31,17 @@ Look before you show. A photo editor rejects most frames; so should you.
 Verdict: **accept** when every score is 4+ and nothing major; **retry** when a defect has a known
 fix; **rethink** when the model or the approach is wrong for this shot (switch per routing.md).
 
+## The tells to check first
+
+From our blind bake-off (31 images, routing.md): these gave images away most often.
+
+1. **Flash shadows** missing, or ones the flash couldn't cast (above the heads, behind only one
+   person). Trace the shadow back to the light.
+2. **Skin rendered by age:** porcelain, waxy young women next to over-sharpened older men in the
+   same frame. Compare skin across people, not just per person.
+3. **Teeth and signs:** uniform veneer teeth; gibberish or kitsch text on background signs. Zoom
+   on mouths and on any lettering.
+
 ## Defect → fix
 
 | defect | fix |
@@ -40,6 +51,8 @@ fix; **rethink** when the model or the approach is wrong for this shot (switch p
 | light incoherent (shadow direction, flash with no shadow) | describe the source position and where its shadow falls ("flash just above the lens; hard shadow on the wall behind, slightly below their heads") |
 | extra, merged or duplicated people | fewer people per frame, frame closer, stay within the model's character slots |
 | distorted small faces | frame closer; distant faces are where models fail |
+| skin differs by age in one frame | ask for the same texture on everyone ("every face shows pores and natural shine, including the young woman") |
+| background signs with gibberish | keep signs out of focus or out of frame, or give the exact words in quotes |
 | teeth or hands broken | frame or pose so they read clearly, or regenerate; a local edit from the source if the rest is right |
 | wrong text | words first and in quotes; move the text job to the text-strong model (routing.md) |
 | edit drifted outside the change | restart from the source with a fuller keep list; composite the edited region back for pixel-critical work |
