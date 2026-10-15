@@ -1,0 +1,48 @@
+{
+  "name": "photo-studio-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Photo Studio front-end: a node canvas for photographic image generation (React + @xyflow/react).",
+  "license": "MIT OR Apache-2.0",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "vite --mode mock",
+    "build": "pnpm typecheck && vite build",
+    "build:mock": "vite build --mode mock --outDir dist-mock",
+    "preview": "vite preview",
+    "preview:mock": "vite preview --outDir dist-mock --port 4174 --strictPort",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "check": "pnpm typecheck && pnpm lint",
+    "shots": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "@tanstack/react-query": "5.104.3",
+    "@xyflow/react": "12.12.0",
+    "lucide-react": "1.57.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.2",
+    "vite": "8.3.4"
+  }
+}

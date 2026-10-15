@@ -7,3 +7,9 @@ plan/
 .DS_Store
 # collaboration server storage (apps/vectorcraft-collab-server)
 /collab-data
+# Photo Studio front-end (apps/photo-studio/web): dependencies, builds, Playwright output
+apps/photo-studio/web/node_modules/
+apps/photo-studio/web/dist/
+apps/photo-studio/web/dist-mock/
+apps/photo-studio/web/test-results/
+apps/photo-studio/web/playwright-report/

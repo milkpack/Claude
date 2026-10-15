@@ -1,0 +1,112 @@
+/* Photo Studio design tokens. The chrome is colour-neutral on purpose (no hue in the greys):
+   a neutral surround keeps colour judgement of the photographs honest. The photos supply the
+   colour; the only hues are the muted wire types and status. */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #161616;
+  --canvas: #1c1c1c;
+  --canvas-dot: #333333;
+  --panel: #202020;
+  --panel-2: #262626;
+  --panel-3: #2e2e2e;
+  --line: #2f2f2f;
+  --line-strong: #3d3d3d;
+  --node: #252525;
+  --node-head: #282828;
+  --node-border: #383838;
+  --node-border-hover: #4a4a4a;
+  --field: #1b1b1b;
+  --field-border: #383838;
+  --field-hover: #444444;
+  --chip: #2c2c2c;
+  --chip-on: #e6e6e6;
+  --chip-on-fg: #141414;
+  --text: #e8e8e8;
+  --text-2: #b8b8b8;
+  --text-3: #8a8a8a;
+  --text-4: #626262;
+  --selection: #ffffff;
+  --focus: #ffffff;
+  --primary: #e9e9e9;
+  --primary-hover: #ffffff;
+  --primary-fg: #121212;
+  --wire-text: #b7a684;
+  --wire-image: #7c9ba3;
+  --wire-spec: #a294b6;
+  --ok: #87a68e;
+  --warn: #c9a660;
+  --danger: #d0806f;
+  --running: #dcdcdc;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-node: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --viewer-surround: #121212;
+  --img-well: #1a1a1a;
+  --minimap-mask: rgba(10, 10, 10, 0.55);
+  --minimap-node: #4a4a4a;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #c9c9c9;
+  --canvas: #d3d3d3;
+  --canvas-dot: #b3b3b3;
+  --panel: #e4e4e4;
+  --panel-2: #dadada;
+  --panel-3: #cfcfcf;
+  --line: #c4c4c4;
+  --line-strong: #b0b0b0;
+  --node: #efefef;
+  --node-head: #ebebeb;
+  --node-border: #bdbdbd;
+  --node-border-hover: #9d9d9d;
+  --field: #f8f8f8;
+  --field-border: #c2c2c2;
+  --field-hover: #a8a8a8;
+  --chip: #e0e0e0;
+  --chip-on: #1d1d1d;
+  --chip-on-fg: #f4f4f4;
+  --text: #171717;
+  --text-2: #3d3d3d;
+  --text-3: #626262;
+  --text-4: #8f8f8f;
+  --selection: #101010;
+  --focus: #101010;
+  --primary: #1b1b1b;
+  --primary-hover: #000000;
+  --primary-fg: #f5f5f5;
+  --wire-text: #8a774f;
+  --wire-image: #4b6f78;
+  --wire-spec: #75668f;
+  --ok: #4d7a58;
+  --warn: #93702a;
+  --danger: #a5503f;
+  --running: #2a2a2a;
+  --scrim: rgba(40, 40, 40, 0.45);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 10px 30px rgba(0, 0, 0, 0.14);
+  --shadow-node: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --viewer-surround: #7f7f7f;
+  --img-well: #c6c6c6;
+  --minimap-mask: rgba(200, 200, 200, 0.6);
+  --minimap-node: #a3a3a3;
+}
+
+:root {
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --fs-xs: 10.5px;
+  --fs-sm: 11.5px;
+  --fs-md: 12.5px;
+  --fs-lg: 14px;
+  --fs-xl: 18px;
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 8px;
+  --topbar-h: 46px;
+  --left-w: 252px;
+  --right-w: 316px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur: 140ms;
+}
