@@ -62,6 +62,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("plugins", Class::Layer(2)),
     ("collab", Class::Layer(2)),
     ("collab-server", Class::Exempt),
+    ("photo-studio", Class::Exempt),
     ("procedural", Class::Layer(2)),
 ];
 
