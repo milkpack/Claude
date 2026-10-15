@@ -63,6 +63,13 @@ From our blind bake-off (31 images, routing.md): these gave images away most oft
 At most two fix rounds per frame. Then tell the user what isn't working and propose the
 alternative (another model, a composite, a simpler shot).
 
+## Delivery checks by use
+
+- Marketplace packshots: the background must be pure white (#FFFFFF, check pixel values at the
+  edges) and the product fully in frame.
+- Text in the image: read every word letter by letter, Cyrillic especially.
+- Ads with real people: confirm consent and a model release exist before delivery.
+
 ## Picking from a batch
 
 Rank the variants, show the best 1–3 with one line each on why, and say what the others got

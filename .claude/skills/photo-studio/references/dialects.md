@@ -64,12 +64,12 @@ prompt must carry its full context, including the preserve list on edits.
 - Pixel-critical regions (a face that must not move, a logo, a label): composite the approved
   edit back into the original instead of trusting the prompt.
 - Settings: `quality` "medium" for exploration, "high" for final portraits, identity edits and
-  small text (about 5× the price; quote it). Sizes above 2560×1440 are experimental. Flare is
+  small text (4× the price at 2k: 40 → 160 credits; quote it). Sizes above 2560×1440 are experimental. Flare is
   faster; Sunburst is the quality and editing-precision tier.
 - Known tendencies (our blind lab, routing.md): GPT Image 2 can produce the most convincing
   candid frame of all models but varies a lot between frames; Sunburst tends to soften or drop
   specific light instructions (it ignored a hard flash shadow twice), so spell the light out and
-  check it; on precise edits Sunburst kept the rest of the frame nearly intact (second-lowest drift);
+  check it; on a precise edit Sunburst's difference map was among the cleanest (n=1);
   on identity in a new scene it pastes the reference face and expression, so describe the new
   expression explicitly.
 
@@ -91,9 +91,10 @@ prompt must carry its full context, including the preserve list on edits.
 - Chinese or English, up to 5,000 characters. References numbered by array order: "image 1",
   "image 2" (up to 9).
 - Image sets: "First image: … Second image: … The features must be consistent throughout."
-- Strength: precise faces; describe faces anatomically (face shape, eye shape, brow, jaw, nose).
+- OpenArt describes it as strong on facial control; our lab found it last on people (glossy, HDR
+  processing, wrong shadows). If you use it, describe faces anatomically and review hard.
 - `thinkingMode` only helps text-to-image without input images. Edits are native up to 2K at
-  Alibaba, so treat OpenArt's 4K image2image as an upscale. `mode: "pro"` costs a flat 15 credits
+  Alibaba; our 4K request came back at about 2K (1816×2272). `mode: "pro"` costs a flat 15 credits
   at any resolution.
 
 ## xAI Grok Imagine Image 2

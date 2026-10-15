@@ -26,6 +26,9 @@ for it, and report the cost instead of letting it decide (unless the user sets a
    (new image, edit, variations, series, reframe, upscale) and what the user gave you (references,
    text, format). Ask at most two questions, only if the answer changes the shot (e.g. "who is
    this for: shop or Instagram?"); otherwise choose and state your assumptions in one line.
+   If the brief names the client's **real person or product** ("our chef", "our perfume") and
+   gives no photo, ask for one; if they want to go ahead without it, say plainly that the result
+   is a stand-in, not their chef or their bottle.
 2. **Decide the shot** with shot-language.md: use and format, subject, setting, light, framing
    and lens, moment, retouch level, text, references, preserve list, variants. Settle only what is
    ambiguous and matters; keep the client's specifics verbatim; add nothing the brief doesn't imply.
@@ -36,14 +39,17 @@ for it, and report the cost instead of letting it decide (unless the user sets a
 5. **Write the prompt** in the model's dialect (dialects.md). Then call
    `openart_model_form_get` for that model and mode (once per session per model) and fill
    `params` from its schema: always set `aspectRatio` and the resolution field, `imageCount` for
-   the variants you need, `autoEnhancePrompt: false`.
-6. **Quote** with `openart_model_cost` (exact params). Tell the user the config and credits before
-   anything over ~100 credits, before batches, and before chains; otherwise just mention the cost.
-   Never submit an unaffordable job; give `upgradeUrl` verbatim if credits run out.
+   the variants you need, and `autoEnhancePrompt: false` **only where the form has that field**
+   (Ideogram and Wan don't, and every form rejects unknown fields).
+6. **Quote** with `openart_model_cost` (exact params). Mention the cost of every job. **Stop and
+   wait for the user's go** before any job or plan over ~300 credits, any batch of 4+ images at
+   4K, and any chain or A/B (quote the whole plan). Never submit an unaffordable job; give
+   `upgradeUrl` verbatim if credits run out.
 7. **Generate** with `openart_generate_image`. In widget hosts (Claude Desktop, claude.ai) the
-   result card polls by itself: say it's underway and stop. In a terminal (Claude Code), wait with
-   `openart_creation_wait(historyId)` if available, else poll `openart_creation_get` honouring
-   `pollAfterSeconds`.
+   result card polls by itself: say it's underway, say what the next step of the plan is (the
+   A/B partner, the next chain hop), and stop; continue on the user's next turn. In a terminal
+   (Claude Code), poll `openart_creation_get` honouring `pollAfterSeconds`
+   (`openart_creation_wait` where the host exposes it).
 8. **Review** with review.md whenever you can see the images (a shell to download them, or images
    returned to you): full frame plus face, hand and text crops; score, list defects, pick the best.
 9. **Fix or deliver.** Fixable defects → a targeted edit from the source or a corrected prompt (at

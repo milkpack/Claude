@@ -6,8 +6,12 @@
 |---|---|
 | a past OpenArt generation | pass it directly: `{type: "image", id: <creation item id>, url: <creation item url>, label: "image1"}` from `openart_creation_list` (verified on 10 image2image jobs) |
 | a file the user has, widget host (Claude Desktop, claude.ai) | `openart_upload_pick`, wait for the upload-complete message, use the references it returns |
+| an image pasted into the terminal | ask for its file path (pasted pixels can't be uploaded), then as below |
 | a file on disk, CLI host (Claude Code) | `openart_upload_sign` → HTTP PUT the bytes to `signURL` → `openart_upload_metadata_get(mediaUrl=accessURL, mediaType="image", uploadId)` |
 | something uploaded before | `openart_upload_list` |
+
+Read the source's pixel size before an edit and set `aspectRatio` to the nearest enum value;
+otherwise many forms fall back to 1:1 or 4:3 and crop the photo.
 
 ## Labelling
 
@@ -31,9 +35,9 @@
 - Identity: start from **one** canonical reference: sharp, evenly lit, frontal or three-quarter,
   face large in frame, no sunglasses or hard shadows. Add more angles only if a test shows the one
   reference isn't enough (Ideogram's docs ask for 1–5 face shots).
-- For a series, build a reference sheet first (big face, neutral grey or white background, front
-  and three-quarter, full length) and reuse it unchanged. A styled sheet leaks its lighting into
-  every scene.
+- Default for a series: the one canonical photo. Build a reference sheet (big face, neutral grey or
+  white background, front and three-quarter, full length) only if likeness drifts across the first
+  frames, then reuse it unchanged. A styled sheet leaks its lighting into every scene.
 
 ## Edits
 
@@ -43,8 +47,10 @@ Every edit prompt carries three parts, every time (OpenArt calls are single-turn
 Edit image 1. Change only: <the change, concrete and visual>.
 Keep exactly: <identity and expression of each person>, <pose>, <framing and crop>,
 <lighting direction and shadows>, <colour grade>, <grain>, <background>, <every object not mentioned>.
-Do not retouch or smooth the skin.
+Keep the natural skin texture: pores, fine lines and shine as they are.
 ```
+(For GPT Image a short "No retouching, no skin smoothing." line works too; Gemini and Ideogram
+follow the positive wording better.)
 
 - One change per call when fidelity matters; batch changes only when they are small and far apart.
 - **Restart from the source, don't chain.** Identity and colour drift accumulate with the number of
@@ -82,5 +88,5 @@ possible.
    lighting or other people from image 1".
 3. Check every frame against the canonical reference at face crop size. Regenerate frames that
    drift rather than editing them toward the face.
-4. Real people: only with their consent. Never minors in sensitive contexts, never public figures
+4. Real people: only with their consent; for ads and campaigns, a signed model release. Never minors in sensitive contexts, never public figures
    in invented situations.

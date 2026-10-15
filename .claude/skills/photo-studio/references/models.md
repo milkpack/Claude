@@ -5,9 +5,9 @@ The aggregator changes models and prices without notice, so **call `openart_mode
 the first generation with a model in a session**. If a schema disagrees with this table, the schema
 wins. Prices are credits per image at the given settings. `imageCount` (1–8) multiplies the price.
 
-| id | best at | t2i / i2i default | expensive settings | refs (i2i) | parameter fields |
+| id | OpenArt's description (routing.md decides) | t2i / i2i default | expensive settings | refs (i2i) | parameter fields |
 |---|---|---|---|---|---|
-| `nano-banana-2-1` | **default for photos**: people, editorial, multi-subject, posters | 30 / 32 (1K) | 4K = 80 | ≤14 | `aspectRatio` (21:9…9:16, no 9:21), `resolution` 1K/2K/4K, `autoEnhancePrompt` |
+| `nano-banana-2-1` | people, editorial, multi-subject, posters | 30 / 32 (1K) | 4K = 80 | ≤14 | `aspectRatio` (21:9…9:16, no 9:21), `resolution` 1K/2K/4K, `autoEnhancePrompt` |
 | `nano-banana-2` | same family, cheaper | 20 / 20 | 4K costs more | ≤14 | same as 2.1 |
 | `nano-banana-pro` | long in-image text, multi-turn edits, ≤5 consistent people | 40 / 40 | 4K = 80 | ≤14 | same as 2.1 |
 | `nano-banana-2-lite` | fast 1K only; no character slots (not for identity) | 15 / 15 | — | ≤10 | `aspectRatio` only |
