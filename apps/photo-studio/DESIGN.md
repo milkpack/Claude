@@ -238,8 +238,7 @@ password, and connect OpenArt in Settings → Connect OpenArt.
 
 The Caddy site goes to `/etc/caddy/sites/photo-studio.caddy`; the main Caddyfile only gets an
 `import /etc/caddy/sites/*.caddy` line, so a VectorCraft site in it is kept. The VectorCraft
-installer rewrites the Caddyfile without that line: run the Photo Studio installer again afterwards
-to restore it.
+installer writes the same import line, so re-running it keeps Photo Studio's site.
 
 Locally: `docker build -f packaging/photo-studio/Dockerfile -t photo-studio .` and
 `docker run -p 8787:8787 -v ps-data:/data -e PHOTO_STUDIO_PASSWORD='at least 12 chars' photo-studio`.
