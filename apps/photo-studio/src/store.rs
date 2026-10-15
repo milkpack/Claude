@@ -56,6 +56,11 @@ pub fn ct_eq(a: &[u8; 32], b: &[u8; 32]) -> bool {
     a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// Constant-time comparison of two strings (the length may leak; contents don't).
+pub fn ct_eq_str(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 /// Ids accepted in paths and file names: 1–64 of `[A-Za-z0-9_-]`. This is also what keeps file
 /// paths inside the data directory.
 pub fn valid_id(id: &str) -> bool {
@@ -135,6 +140,7 @@ pub fn json_ids(dir: &Path, max: usize) -> Vec<String> {
         if valid_id(id) && entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             out.push(id.to_string());
             if out.len() >= max {
+                log::warn!("{}: more than {max} entries; the rest are ignored", dir.display());
                 break;
             }
         }

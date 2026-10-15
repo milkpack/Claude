@@ -41,18 +41,21 @@ pub struct Quote {
 pub struct OpenArt {
     pub oauth: OAuth,
     mcp: Mcp,
+    /// For the presigned upload: no credentials, checked redirects.
     http: reqwest::Client,
+    allow_private_urls: bool,
     models: Mutex<Option<(u64, Value)>>,
     forms: Mutex<HashMap<(String, String), (u64, Value)>>,
     account: Mutex<Option<(u64, Value)>>,
 }
 
 impl OpenArt {
-    pub fn new(oauth: OAuth, mcp_url: String, http: reqwest::Client) -> OpenArt {
+    pub fn new(oauth: OAuth, mcp_url: String, http: reqwest::Client, fetch: reqwest::Client, allow_private_urls: bool) -> OpenArt {
         OpenArt {
             oauth,
-            mcp: Mcp::new(mcp_url, http.clone()),
-            http,
+            mcp: Mcp::new(mcp_url, http),
+            http: fetch,
+            allow_private_urls,
             models: Mutex::new(None),
             forms: Mutex::new(HashMap::new()),
             account: Mutex::new(None),
@@ -197,10 +200,18 @@ impl OpenArt {
             .ok_or_else(|| ApiError::upstream("OpenArt openart_upload_sign returned no access URL"))?;
         let upload_id = pick(&["uploadId", "id"]);
 
+        crate::net::check_fetch_url(&sign_url, self.allow_private_urls)
+            .await
+            .map_err(|e| ApiError::upstream(format!("OpenArt's upload URL was refused: {e}")))?;
         let mut put = self.http.put(&sign_url).timeout(PUT_TIMEOUT).header(reqwest::header::CONTENT_TYPE, content_type);
+        // Storage headers only (the signature may cover them); nothing that could carry credentials.
         if let Some(headers) = signed.get("headers").and_then(Value::as_object) {
             for (k, v) in headers.iter().take(32) {
-                if let Some(v) = v.as_str() {
+                let name = k.to_ascii_lowercase();
+                let allowed = ["x-amz-", "x-goog-", "x-ms-"].iter().any(|p| name.starts_with(p))
+                    || (name.starts_with("content-") && name != "content-type" && name != "content-length")
+                    || name == "cache-control";
+                if let (true, Some(v)) = (allowed, v.as_str()) {
                     put = put.header(k.as_str(), v);
                 }
             }

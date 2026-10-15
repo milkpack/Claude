@@ -7,6 +7,7 @@ mod jobs_tests;
 mod misc_tests;
 mod mock;
 mod openart_tests;
+mod regression_tests;
 mod upload_tests;
 
 use std::path::{Path, PathBuf};
@@ -32,6 +33,7 @@ pub struct Config {
     pub static_dir: Option<PathBuf>,
     pub skill: Option<Skill>,
     pub data_dir: Option<PathBuf>,
+    pub give_up: Option<Duration>,
 }
 
 pub struct TestServer {
@@ -73,8 +75,9 @@ impl TestServer {
                 first_poll: Duration::from_millis(10),
                 min_poll: Duration::from_millis(10),
                 max_poll: Duration::from_millis(50),
-                give_up: Duration::from_secs(60),
+                give_up: cfg.give_up.unwrap_or(Duration::from_secs(60)),
             },
+            allow_private_urls: true,
         };
         let a = server::build(opts).unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
@@ -111,6 +114,24 @@ impl TestServer {
             .send()
             .await
             .unwrap()
+    }
+
+    /// POST that gives up (drops the request) after `timeout`, like a closed tab or a proxy timeout.
+    pub async fn post_abandoned(&self, path: &str, body: Value, timeout: Duration) -> Result<reqwest::Response, reqwest::Error> {
+        self.with_cookie(self.client.post(self.url(path)))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.to_string())
+            .timeout(timeout)
+            .send()
+            .await
+    }
+
+    pub fn cookie(&self) -> Option<String> {
+        self.cookie.lock().unwrap().clone()
+    }
+
+    pub fn set_cookie(&self, c: Option<String>) {
+        *self.cookie.lock().unwrap() = c;
     }
 
     pub async fn post(&self, path: &str, body: Value) -> reqwest::Response {

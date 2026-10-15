@@ -81,9 +81,6 @@ async fn run(cli: Cli) -> Result<(), String> {
             None
         }
     };
-    if cli.password.chars().count() < 12 {
-        warn!("PHOTO_STUDIO_PASSWORD is shorter than 12 characters");
-    }
     let claude_line = match &cli.anthropic_api_key {
         Some(_) => format!("configured ({}, effort {})", cli.claude_model, cli.claude_effort),
         None => "not configured (set ANTHROPIC_API_KEY)".to_string(),
@@ -102,6 +99,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         skill,
         trust_proxy: cli.trust_proxy,
         timing: jobs::JobTiming::default(),
+        allow_private_urls: false,
     };
     let app = server::build(opts)?;
     let addr = format!("{}:{}", cli.host, cli.port);

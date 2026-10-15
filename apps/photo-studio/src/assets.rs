@@ -186,12 +186,12 @@ impl Assets {
         if bytes.len() > MAX_ASSET_BYTES {
             return Err(ApiError::too_large(format!("images are limited to {} MB", MAX_ASSET_BYTES >> 20)));
         }
-        let (bytes, processed) = tokio::task::spawn_blocking(move || {
+        let (bytes, processed) = imaging::run(move || {
             let p = imaging::process(&bytes);
             (bytes, p)
         })
         .await
-        .map_err(|e| ApiError::internal(format!("image task: {e}")))?;
+        .map_err(ApiError::internal)?;
         let processed = processed.map_err(ApiError::bad_request)?;
         let asset = StoredAsset {
             id: store::new_id(),

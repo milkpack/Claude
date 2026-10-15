@@ -59,7 +59,13 @@ pub struct Options {
     pub skill: Skill,
     pub trust_proxy: bool,
     pub timing: JobTiming,
+    /// Accept plain http and private addresses for upstream URLs (tests against local mocks
+    /// only; always `false` in the binary).
+    pub allow_private_urls: bool,
 }
+
+/// Shortest accepted owner password.
+pub const MIN_PASSWORD_CHARS: usize = 12;
 
 pub struct App {
     pub auth: Auth,
@@ -72,8 +78,9 @@ pub struct App {
     pub routing: HashMap<String, Vec<String>>,
     pub director_system: String,
     pub review_system: String,
-    /// Plain client for CDN downloads (no credentials attached).
-    pub http: reqwest::Client,
+    /// For URLs that came from upstream (CDN downloads): no credentials, checked redirects.
+    pub fetch: reqwest::Client,
+    pub allow_private_urls: bool,
     pub static_dir: Option<PathBuf>,
     /// Set to `true` when the server stops; background pollers exit on it.
     pub stop: tokio::sync::watch::Sender<bool>,
@@ -81,6 +88,9 @@ pub struct App {
 
 /// Create the data directories and the application state.
 pub fn build(opts: Options) -> Result<Arc<App>, String> {
+    if opts.password.chars().count() < MIN_PASSWORD_CHARS {
+        return Err(format!("the owner password must have at least {MIN_PASSWORD_CHARS} characters"));
+    }
     let secrets = opts.data_dir.join("secrets");
     store::ensure_dir(&opts.data_dir, false)?;
     store::ensure_dir(&secrets, true)?;
@@ -89,12 +99,14 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
         .user_agent(concat!("photo-studio/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| format!("HTTP client: {e}"))?;
+    let fetch = crate::net::fetch_client(opts.allow_private_urls)?;
     let public = opts.public_url.trim_end_matches('/').to_string();
     let oauth = OAuth::load(
         OAuthConfig {
             mcp_url: opts.openart_mcp_url.clone(),
             issuer: opts.openart_issuer.clone(),
             redirect_uri: format!("{public}/oauth/openart/callback"),
+            allow_insecure: opts.allow_private_urls,
         },
         http.clone(),
         secrets.join("openart.json"),
@@ -105,7 +117,7 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
         .map(|key| Claude::new(http.clone(), opts.anthropic_base_url.clone(), key, opts.claude_model.clone(), opts.claude_effort.clone()));
     Ok(Arc::new(App {
         auth: Auth::load(&opts.password, secrets.join("sessions.json"), public.starts_with("https://"), opts.trust_proxy),
-        openart: OpenArt::new(oauth, opts.openart_mcp_url, http.clone()),
+        openart: OpenArt::new(oauth, opts.openart_mcp_url, http.clone(), fetch.clone(), opts.allow_private_urls),
         assets: Assets::load(opts.data_dir.join("assets"))?,
         jobs: Jobs::load(opts.data_dir.join("jobs"), opts.timing)?,
         workflows: Workflows::new(opts.data_dir.join("workflows"))?,
@@ -114,7 +126,8 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
         routing: opts.skill.routing(),
         director_system: director::system_prompt(&opts.skill),
         review_system: review::system_prompt(&opts.skill),
-        http,
+        fetch,
+        allow_private_urls: opts.allow_private_urls,
         static_dir: opts.static_dir,
         stop: tokio::sync::watch::channel(false).0,
     }))
@@ -122,7 +135,6 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
 
 pub fn router(app: Arc<App>) -> Router {
     let protected = Router::new()
-        .route("/api/logout", post(logout))
         .route("/api/openart/disconnect", post(disconnect))
         .route("/oauth/openart/start", get(oauth_start))
         .route("/api/models", get(models))
@@ -143,6 +155,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/healthz", get(|| async { "ok" }))
         .route("/api/me", get(me))
         .route("/api/login", post(login))
+        // Public so a stale cookie can always be cleared; signing out everywhere needs a session.
+        .route("/api/logout", post(logout))
         .route("/oauth/openart/callback", get(oauth_callback))
         .merge(protected)
         .fallback(fallback)
@@ -153,7 +167,7 @@ pub fn router(app: Arc<App>) -> Router {
 
 /// Resume unfinished jobs, then serve on `listener` until `shutdown` completes.
 pub async fn serve(listener: TcpListener, app: Arc<App>, shutdown: impl Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
-    jobs::resume(&app);
+    jobs::resume(&app).await;
     let result =
         axum::serve(listener, router(app.clone()).into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(shutdown).await;
     // Unfinished jobs resume from disk on the next start.
@@ -233,15 +247,15 @@ async fn login(
     JsonBody(body): JsonBody<LoginBody>,
 ) -> Response {
     let ip = app.auth.client_ip(peer, &headers);
-    if app.auth.rate_limited(ip) {
-        warn!("login: too many failed attempts from {ip}");
+    let Some(attempt) = app.auth.begin_attempt(ip) else {
+        warn!("login: too many failed attempts (from {ip} or overall)");
         return ApiError::rate_limited("too many failed sign-in attempts; wait a minute").into_response();
-    }
+    };
     if !app.auth.check_password(&body.password) {
-        app.auth.record_failure(ip);
         warn!("login: wrong password from {ip}");
         return ApiError::unauthenticated("wrong password").into_response();
     }
+    app.auth.forgive(attempt);
     let token = app.auth.create_session().await;
     info!("login from {ip}");
     let mut resp = Json(me_json(&app, true).await).into_response();
@@ -251,8 +265,17 @@ async fn login(
     resp
 }
 
-async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    if let Some(t) = auth::session_token(&headers) {
+#[derive(Deserialize)]
+struct LogoutQuery {
+    all: Option<String>,
+}
+
+async fn logout(State(app): State<Arc<App>>, headers: HeaderMap, q: Result<Query<LogoutQuery>, QueryRejection>) -> Response {
+    let all = q.ok().and_then(|Query(q)| q.all).is_some_and(|a| a == "1" || a == "true");
+    if all && app.auth.valid_headers(&headers) {
+        info!("signing out every session");
+        app.auth.destroy_all().await;
+    } else if let Some(t) = auth::session_token(&headers) {
         app.auth.destroy(&t).await;
     }
     let mut resp = Json(json!({})).into_response();
@@ -297,6 +320,8 @@ async fn oauth_callback(State(app): State<Arc<App>>, q: Result<Query<CallbackQue
     match app.openart.oauth.finish(&code, &state).await {
         Ok(()) => {
             app.openart.reset().await;
+            // Jobs that stopped while OpenArt was unreachable can finish now.
+            jobs::revive(&app).await;
             Redirect::to("/?openart=connected").into_response()
         }
         Err(e) => {

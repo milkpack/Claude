@@ -77,9 +77,10 @@ impl Mcp {
                     self.reset().await;
                     token = oauth.refresh_after_401(&token).await?;
                 }
+                // Refused again with a freshly refreshed token: a problem with this call (a scope, a
+                // gateway), not with the connection, which the refresh just proved valid.
                 Err(McpError::Unauthorized) => {
-                    oauth.mark_reconnect().await;
-                    return Err(ApiError::openart_reconnect());
+                    return Err(ApiError::upstream(format!("OpenArt refused {tool} (HTTP 401) even after a token refresh")));
                 }
                 Err(McpError::SessionGone) if !reinitialized => {
                     reinitialized = true;

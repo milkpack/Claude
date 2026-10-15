@@ -12,7 +12,9 @@ use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 /// Don't serve files larger than this (a web bundle is far smaller).
-const MAX_STATIC_BYTES: u64 = 256 << 20;
+const MAX_STATIC_BYTES: u64 = 32 << 20;
+/// Files are streamed in chunks of this size (never read whole into memory).
+const CHUNK: usize = 64 << 10;
 
 /// `uri_path` (still percent-encoded) as a relative path, `None` when it's not acceptable.
 pub fn sanitize(uri_path: &str) -> Option<PathBuf> {
@@ -92,11 +94,11 @@ pub async fn serve(root: &Path, method: &Method, uri_path: &str) -> Response {
         },
         None => return not_found(),
     };
-    let body = match tokio::fs::read(&file).await {
-        Ok(b) => b,
+    let opened = match tokio::fs::File::open(&file).await {
+        Ok(f) => f,
         Err(_) => return not_found(),
     };
-    let mut resp = if method == Method::HEAD { Response::new(Body::empty()) } else { Response::new(Body::from(body)) };
+    let mut resp = if method == Method::HEAD { Response::new(Body::empty()) } else { Response::new(Body::from_stream(chunks(opened))) };
     let headers = resp.headers_mut();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type(&file)));
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
@@ -110,6 +112,23 @@ pub async fn serve(root: &Path, method: &Method, uri_path: &str) -> Response {
     };
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
     resp
+}
+
+/// The file's bytes as a stream of chunks; ends after the first error.
+fn chunks(file: tokio::fs::File) -> impl futures_util::Stream<Item = std::io::Result<Vec<u8>>> + Send {
+    futures_util::stream::unfold(Some(file), |state| async move {
+        use tokio::io::AsyncReadExt;
+        let mut f = state?;
+        let mut buf = vec![0u8; CHUNK];
+        match f.read(&mut buf).await {
+            Ok(0) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                Some((Ok(buf), Some(f)))
+            }
+            Err(e) => Some((Err(e), None)),
+        }
+    })
 }
 
 /// `path` (or `path/index.html` for a directory) if it is a regular file inside `root`.

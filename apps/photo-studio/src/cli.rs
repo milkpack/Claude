@@ -31,7 +31,7 @@ OPTIONS:
     -V, --version               Print the version
 
 ENVIRONMENT:
-    PHOTO_STUDIO_PASSWORD       The owner's password (required)
+    PHOTO_STUDIO_PASSWORD       The owner's password (required, at least 12 characters)
     ANTHROPIC_API_KEY           Enables the director and review nodes
     PHOTO_STUDIO_CLAUDE_MODEL   Claude model [default: claude-opus-5-5]
     PHOTO_STUDIO_CLAUDE_EFFORT  low | medium | high | xhigh | max [default: medium]
@@ -146,6 +146,9 @@ impl Cli {
         // Secrets: environment only, and never trimmed beyond surrounding whitespace.
         let password =
             env("PHOTO_STUDIO_PASSWORD").ok_or_else(|| CliError::Bad("PHOTO_STUDIO_PASSWORD is required (the owner's password)".into()))?;
+        if password.chars().count() < crate::server::MIN_PASSWORD_CHARS {
+            return Err(CliError::Bad(format!("PHOTO_STUDIO_PASSWORD must have at least {} characters", crate::server::MIN_PASSWORD_CHARS)));
+        }
         let anthropic_api_key = env("ANTHROPIC_API_KEY");
         let claude_model = env("PHOTO_STUDIO_CLAUDE_MODEL").unwrap_or_else(|| DEFAULT_CLAUDE_MODEL.into());
         let claude_effort = env("PHOTO_STUDIO_CLAUDE_EFFORT").unwrap_or_else(|| DEFAULT_CLAUDE_EFFORT.into());
@@ -192,7 +195,7 @@ mod tests {
     #[test]
     fn defaults_need_a_password() {
         assert!(matches!(parse(&[], &[]), Err(CliError::Bad(m)) if m.contains("PHOTO_STUDIO_PASSWORD")));
-        let c = parse(&[], &[("PHOTO_STUDIO_PASSWORD", "pw")]).unwrap();
+        let c = parse(&[], &[("PHOTO_STUDIO_PASSWORD", "a long password")]).unwrap();
         assert_eq!((c.host.as_str(), c.port), ("127.0.0.1", 8787));
         assert_eq!(c.public_url, "http://127.0.0.1:8787");
         assert_eq!(c.data_dir, PathBuf::from("./photo-studio-data"));
@@ -201,13 +204,14 @@ mod tests {
         assert_eq!(c.openart_mcp_url, DEFAULT_MCP_URL);
         assert_eq!(c.anthropic_base_url, DEFAULT_ANTHROPIC_URL);
         assert!(c.anthropic_api_key.is_none() && c.openart_issuer.is_none() && !c.trust_proxy);
-        assert!(!format!("{c:?}").contains("pw\""), "the password is redacted");
+        assert!(!format!("{c:?}").contains("a long password"), "the password is redacted");
+        assert!(matches!(parse(&[], &[("PHOTO_STUDIO_PASSWORD", "short")]), Err(CliError::Bad(m)) if m.contains("12")));
     }
 
     #[test]
     fn flags_override_env() {
         let env = [
-            ("PHOTO_STUDIO_PASSWORD", "pw"),
+            ("PHOTO_STUDIO_PASSWORD", "a long password"),
             ("PHOTO_STUDIO_PORT", "9000"),
             ("PHOTO_STUDIO_HOST", "0.0.0.0"),
             ("ANTHROPIC_BASE_URL", "http://127.0.0.1:5/"),
@@ -228,13 +232,13 @@ mod tests {
 
     #[test]
     fn bad_input() {
-        let env = [("PHOTO_STUDIO_PASSWORD", "pw")];
+        let env = [("PHOTO_STUDIO_PASSWORD", "a long password")];
         assert_eq!(parse(&["--help"], &[]), Err(CliError::Help));
         assert_eq!(parse(&["-V"], &[]), Err(CliError::Version));
         assert!(matches!(parse(&["--port", "x"], &env), Err(CliError::Bad(_))));
         assert!(matches!(parse(&["--port"], &env), Err(CliError::Bad(_))));
         assert!(matches!(parse(&["--nope"], &env), Err(CliError::Bad(_))));
         assert!(matches!(parse(&["--public-url", "ftp://x"], &env), Err(CliError::Bad(_))));
-        assert!(matches!(parse(&[], &[("PHOTO_STUDIO_PASSWORD", "pw"), ("PHOTO_STUDIO_CLAUDE_EFFORT", "huge")]), Err(CliError::Bad(_))));
+        assert!(matches!(parse(&[], &[("PHOTO_STUDIO_PASSWORD", "a long password"), ("PHOTO_STUDIO_CLAUDE_EFFORT", "huge")]), Err(CliError::Bad(_))));
     }
 }

@@ -175,9 +175,9 @@ fn bounded(name: &str, s: &Option<String>) -> ApiResult<Option<String>> {
 async fn review_jpeg(app: &App, id: &str, what: &str) -> ApiResult<(crate::assets::StoredAsset, Vec<u8>)> {
     let asset = store::valid_id(id).then(|| app.assets.get(id)).flatten().ok_or_else(|| ApiError::not_found(format!("no such {what} asset")))?;
     let bytes = app.assets.read_file(&asset).await?;
-    let jpeg = tokio::task::spawn_blocking(move || crate::imaging::jpeg_for_claude(&bytes, REVIEW_EDGE))
+    let jpeg = crate::imaging::run(move || crate::imaging::jpeg_for_claude(&bytes, REVIEW_EDGE))
         .await
-        .map_err(|e| ApiError::internal(format!("image task: {e}")))?
+        .map_err(ApiError::internal)?
         .map_err(ApiError::bad_request)?;
     Ok((asset, jpeg))
 }

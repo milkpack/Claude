@@ -33,6 +33,8 @@ pub struct WorkflowInput {
 pub struct Workflows {
     dir: PathBuf,
     lock: tokio::sync::Mutex<()>,
+    /// id → (name, updatedAt), so listing doesn't read every graph.
+    index: std::sync::Mutex<std::collections::HashMap<String, (String, u64)>>,
 }
 
 fn check_name(name: &str) -> ApiResult<String> {
@@ -51,7 +53,24 @@ fn check_graph(graph: &Value) -> ApiResult<()> {
 impl Workflows {
     pub fn new(dir: PathBuf) -> Result<Workflows, String> {
         store::ensure_dir(&dir, false)?;
-        Ok(Workflows { dir, lock: tokio::sync::Mutex::new(()) })
+        let mut index = std::collections::HashMap::new();
+        for id in store::json_ids(&dir, MAX_WORKFLOWS) {
+            let Ok(Some(bytes)) = store::read_capped(&dir.join(format!("{id}.json")), MAX_FILE) else { continue };
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Summary {
+                id: String,
+                name: String,
+                updated_at: u64,
+            }
+            match serde_json::from_slice::<Summary>(&bytes) {
+                Ok(s) if s.id == id => {
+                    index.insert(id, (s.name, s.updated_at));
+                }
+                _ => warn!("workflow {id}: unreadable; skipped"),
+            }
+        }
+        Ok(Workflows { dir, lock: tokio::sync::Mutex::new(()), index: std::sync::Mutex::new(index) })
     }
 
     fn path(&self, id: &str) -> PathBuf {
@@ -84,7 +103,9 @@ impl Workflows {
         store::write_atomic_async(self.path(&w.id), bytes, false).await.map_err(|e| {
             warn!("{e}");
             ApiError::internal("can't save the workflow")
-        })
+        })?;
+        store::lock(&self.index).insert(w.id.clone(), (w.name.clone(), w.updated_at));
+        Ok(())
     }
 
     pub async fn get(&self, id: &str) -> ApiResult<Workflow> {
@@ -121,7 +142,10 @@ impl Workflows {
         }
         let _g = self.lock.lock().await;
         match tokio::fs::remove_file(self.path(id)).await {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                store::lock(&self.index).remove(id);
+                Ok(())
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(ApiError::not_found("no such workflow")),
             Err(e) => {
                 warn!("deleting workflow {id}: {e}");
@@ -132,30 +156,8 @@ impl Workflows {
 
     /// `{id, name, updatedAt}` of every workflow, most recently updated first.
     pub async fn list(&self) -> ApiResult<Vec<Value>> {
-        let dir = self.dir.clone();
-        let list = tokio::task::spawn_blocking(move || {
-            let mut out = Vec::new();
-            for id in store::json_ids(&dir, MAX_WORKFLOWS) {
-                let path = dir.join(format!("{id}.json"));
-                let Ok(Some(bytes)) = store::read_capped(&path, MAX_FILE) else { continue };
-                #[derive(Deserialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Summary {
-                    id: String,
-                    name: String,
-                    updated_at: u64,
-                }
-                if let Ok(s) = serde_json::from_slice::<Summary>(&bytes)
-                    && s.id == id
-                {
-                    out.push(s);
-                }
-            }
-            out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then_with(|| a.id.cmp(&b.id)));
-            out.into_iter().map(|s| json!({ "id": s.id, "name": s.name, "updatedAt": s.updated_at })).collect::<Vec<_>>()
-        })
-        .await
-        .map_err(|e| ApiError::internal(format!("list task: {e}")))?;
-        Ok(list)
+        let mut list: Vec<(String, String, u64)> = store::lock(&self.index).iter().map(|(id, (n, t))| (id.clone(), n.clone(), *t)).collect();
+        list.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        Ok(list.into_iter().map(|(id, name, t)| json!({ "id": id, "name": name, "updatedAt": t })).collect())
     }
 }

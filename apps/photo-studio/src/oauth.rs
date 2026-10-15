@@ -8,10 +8,10 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use log::{info, warn};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -38,6 +38,8 @@ pub struct OAuthConfig {
     pub issuer: Option<String>,
     /// `<public url>/oauth/openart/callback`.
     pub redirect_uri: String,
+    /// Accept plain-http OAuth endpoints (tests against local mocks only).
+    pub allow_insecure: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -98,7 +100,83 @@ struct Pending {
     client_secret: Option<String>,
 }
 
+/// The OpenArt connection. Cheap to clone. Token requests (the code exchange and refreshes)
+/// run in their own tasks, one at a time: a cancelled HTTP request (a closed tab, an aborted
+/// fetch, a timeout) can't drop a refresh half-way and lose a rotated refresh token.
+#[derive(Clone)]
 pub struct OAuth {
+    inner: Arc<OAuthInner>,
+}
+
+impl std::ops::Deref for OAuth {
+    type Target = OAuthInner;
+    fn deref(&self) -> &OAuthInner {
+        &self.inner
+    }
+}
+
+impl OAuth {
+    pub fn load(cfg: OAuthConfig, http: reqwest::Client, file: PathBuf) -> OAuth {
+        OAuth { inner: Arc::new(OAuthInner::load(cfg, http, file)) }
+    }
+
+    /// A usable access token, refreshing it when it is about to expire.
+    pub async fn access_token(&self) -> ApiResult<String> {
+        {
+            let s = self.inner.secrets.lock().await;
+            if s.needs_reconnect {
+                return Err(ApiError::openart_reconnect());
+            }
+            let Some(t) = &s.tokens else { return Err(ApiError::openart_not_connected()) };
+            if !expiring(t) {
+                return Ok(t.access_token.clone());
+            }
+        }
+        self.refresh_detached(None).await
+    }
+
+    /// After a 401 with `stale`: refresh, unless another request already did.
+    pub async fn refresh_after_401(&self, stale: &str) -> ApiResult<String> {
+        self.refresh_detached(Some(stale.to_string())).await
+    }
+
+    /// Refresh in a task of its own (single flight: the secrets lock serialises refreshes, and
+    /// each re-checks whether one that ran meanwhile already did the job).
+    async fn refresh_detached(&self, stale: Option<String>) -> ApiResult<String> {
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            let mut s = inner.secrets.lock().await;
+            if s.needs_reconnect {
+                return Err(ApiError::openart_reconnect());
+            }
+            let Some(t) = &s.tokens else { return Err(ApiError::openart_not_connected()) };
+            let current = t.access_token.clone();
+            match &stale {
+                Some(old) if *old != current => return Ok(current),
+                None if !expiring(t) => return Ok(current),
+                _ => {}
+            }
+            inner.refresh_locked(&mut s).await
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("token refresh task: {e}")))?
+    }
+
+    /// Finish an authorization from the callback's `code` and `state` (in its own task).
+    pub async fn finish(&self, code: &str, state: &str) -> ApiResult<()> {
+        let inner = self.inner.clone();
+        let (code, state) = (code.to_string(), state.to_string());
+        tokio::spawn(async move { inner.finish_exchange(&code, &state).await })
+            .await
+            .map_err(|e| ApiError::internal(format!("token exchange task: {e}")))?
+    }
+}
+
+fn expiring(t: &Tokens) -> bool {
+    t.expires_at.is_some_and(|e| now_ms().saturating_add(REFRESH_MARGIN_MS) >= e)
+}
+
+pub struct OAuthInner {
     cfg: OAuthConfig,
     http: reqwest::Client,
     file: PathBuf,
@@ -115,8 +193,8 @@ enum TokenError {
     Transient(String),
 }
 
-impl OAuth {
-    pub fn load(cfg: OAuthConfig, http: reqwest::Client, file: PathBuf) -> OAuth {
+impl OAuthInner {
+    fn load(cfg: OAuthConfig, http: reqwest::Client, file: PathBuf) -> OAuthInner {
         let secrets = match store::read_capped(&file, 1 << 20) {
             Ok(Some(bytes)) => serde_json::from_slice::<Secrets>(&bytes).unwrap_or_else(|e| {
                 warn!("{}: {e}; OpenArt must be connected again", file.display());
@@ -128,7 +206,7 @@ impl OAuth {
                 Secrets::default()
             }
         };
-        OAuth {
+        OAuthInner {
             cfg,
             http,
             file,
@@ -200,8 +278,8 @@ impl OAuth {
                 (issuer, resource)
             }
         };
-        if !net::is_http_url(&issuer) {
-            return Err(format!("authorization server `{issuer}` is not an http(s) URL"));
+        if !net::is_http_url(&issuer) || !(self.cfg.allow_insecure || issuer.starts_with("https://")) {
+            return Err(format!("authorization server `{issuer}` is not an https URL"));
         }
         let iu = reqwest::Url::parse(&issuer).map_err(|e| format!("issuer: {e}"))?;
         let origin = iu.origin().ascii_serialization();
@@ -225,7 +303,8 @@ impl OAuth {
             }
         }
         let meta = meta.ok_or(last_err)?;
-        let s = |k: &str| meta.get(k).and_then(Value::as_str).map(str::to_string).filter(|u| net::is_http_url(u));
+        let secure = |u: &str| net::is_http_url(u) && (self.cfg.allow_insecure || u.starts_with("https://"));
+        let s = |k: &str| meta.get(k).and_then(Value::as_str).map(str::to_string).filter(|u| secure(u));
         if let Some(i) = meta.get("issuer").and_then(Value::as_str)
             && i.trim_end_matches('/') != issuer.trim_end_matches('/')
         {
@@ -326,7 +405,7 @@ impl OAuth {
     }
 
     /// Finish an authorization from the callback's `code` and `state`.
-    pub async fn finish(&self, code: &str, state: &str) -> ApiResult<()> {
+    async fn finish_exchange(&self, code: &str, state: &str) -> ApiResult<()> {
         let pending = lock(&self.pending).remove(state);
         let p = pending
             .filter(|p| now_ms().saturating_sub(p.created_at) < PENDING_TTL_MS)
@@ -403,32 +482,6 @@ impl OAuth {
         })
     }
 
-    /// A usable access token, refreshing it when it is about to expire.
-    pub async fn access_token(&self) -> ApiResult<String> {
-        let mut s = self.secrets.lock().await;
-        if s.needs_reconnect {
-            return Err(ApiError::openart_reconnect());
-        }
-        let Some(t) = &s.tokens else { return Err(ApiError::openart_not_connected()) };
-        if t.expires_at.is_some_and(|e| now_ms().saturating_add(REFRESH_MARGIN_MS) >= e) {
-            return self.refresh_locked(&mut s).await;
-        }
-        Ok(t.access_token.clone())
-    }
-
-    /// After a 401 with `stale`: refresh, unless another request already did.
-    pub async fn refresh_after_401(&self, stale: &str) -> ApiResult<String> {
-        let mut s = self.secrets.lock().await;
-        if s.needs_reconnect {
-            return Err(ApiError::openart_reconnect());
-        }
-        match &s.tokens {
-            None => Err(ApiError::openart_not_connected()),
-            Some(t) if t.access_token != stale => Ok(t.access_token.clone()),
-            Some(_) => self.refresh_locked(&mut s).await,
-        }
-    }
-
     async fn refresh_locked(&self, s: &mut Secrets) -> ApiResult<String> {
         let Some(t) = s.tokens.clone() else { return Err(ApiError::openart_not_connected()) };
         let Some(refresh) = t.refresh_token.clone() else {
@@ -451,7 +504,11 @@ impl OAuth {
                 let access = new.access_token.clone();
                 s.tokens = Some(Tokens { client_id: t.client_id, client_secret: t.client_secret, ..new });
                 s.needs_reconnect = false;
-                self.save(s).await?;
+                // The new tokens are valid whether or not they reach the disk: keep using them
+                // (a restart before the next successful save would need a reconnect).
+                if let Err(e) = self.save(s).await {
+                    error!("OpenArt tokens refreshed but not saved: {}", e.message);
+                }
                 info!("OpenArt access token refreshed");
                 Ok(access)
             }
@@ -462,17 +519,6 @@ impl OAuth {
                 Err(ApiError::openart_reconnect())
             }
             Err(TokenError::Transient(m)) => Err(ApiError::upstream(format!("OpenArt token refresh failed: {m}"))),
-        }
-    }
-
-    /// Mark the connection as needing a reconnect (the server keeps rejecting our tokens).
-    pub async fn mark_reconnect(&self) {
-        let mut s = self.secrets.lock().await;
-        if s.tokens.is_some() && !s.needs_reconnect {
-            s.needs_reconnect = true;
-            if let Err(e) = self.save(&s).await {
-                warn!("{e}");
-            }
         }
     }
 

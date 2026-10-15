@@ -254,9 +254,9 @@ pub async fn run(app: Arc<App>, req: DirectorRequest) -> ApiResult<DirectorRespo
             .ok_or_else(|| ApiError::bad_request(format!("unknown reference asset `{}`", r.asset_id)))?;
         let role = r.role.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.chars().take(64).collect::<String>());
         let bytes = app.assets.read_file(&asset).await?;
-        let jpeg = tokio::task::spawn_blocking(move || crate::imaging::jpeg_for_claude(&bytes, REF_EDGE))
+        let jpeg = crate::imaging::run(move || crate::imaging::jpeg_for_claude(&bytes, REF_EDGE))
             .await
-            .map_err(|e| ApiError::internal(format!("image task: {e}")))?
+            .map_err(ApiError::internal)?
             .map_err(ApiError::bad_request)?;
         refs_meta.push(json!({
             "image": format!("Reference {}", i + 1),

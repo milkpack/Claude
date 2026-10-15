@@ -56,6 +56,11 @@ pub struct OpenArtState {
     pub cdn: Mutex<HashMap<String, Vec<u8>>>,
     pub cdn_hits: AtomicU64,
     pub puts: Mutex<Vec<(String, Vec<u8>, String)>>,
+    /// Delay before answering `openart_generate_image` (after recording the call).
+    pub generate_delay_ms: AtomicU64,
+    /// Rotate refresh tokens (the old one dies at once) and answer refreshes after this delay.
+    pub rotate_refresh: AtomicBool,
+    pub refresh_delay_ms: AtomicU64,
 }
 
 impl OpenArtState {
@@ -101,6 +106,9 @@ impl MockOpenArt {
             cdn: Mutex::default(),
             cdn_hits: AtomicU64::new(0),
             puts: Mutex::default(),
+            generate_delay_ms: AtomicU64::new(0),
+            rotate_refresh: AtomicBool::new(false),
+            refresh_delay_ms: AtomicU64::new(0),
         });
         let router = Router::new()
             .route("/.well-known/oauth-protected-resource/mcp", get(prm))
@@ -188,6 +196,14 @@ async fn token(State(s): State<Arc<OpenArtState>>, body: Bytes) -> Response {
             let rt = form.get("refresh_token").cloned().unwrap_or_default();
             if s.reject_refresh.load(Ordering::SeqCst) || !s.valid_refresh.lock().unwrap().contains(&rt) {
                 return bad("invalid_grant");
+            }
+            if s.rotate_refresh.load(Ordering::SeqCst) {
+                // OAuth 2.1 public client: a new refresh token, and the old one dies at once.
+                s.valid_refresh.lock().unwrap().remove(&rt);
+                let v = issue(&s, None);
+                let d = s.refresh_delay_ms.load(Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(d)).await;
+                return Json(v).into_response();
             }
             // Rotate the access token, keep the refresh token (the response omits it).
             let mut v = issue(&s, Some(rt));
@@ -304,7 +320,12 @@ async fn mcp(State(s): State<Arc<OpenArtState>>, headers: HeaderMap, Json(msg): 
         let name = msg["params"]["name"].as_str().unwrap_or("").to_string();
         let args = msg["params"]["arguments"].clone();
         s.calls.lock().unwrap().push((name.clone(), args.clone()));
-        tool_result(&name, tool(&s, &name, &args))
+        let r = tool_result(&name, tool(&s, &name, &args));
+        if name == "openart_generate_image" {
+            let d = s.generate_delay_ms.load(Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(d)).await;
+        }
+        r
     };
     let reply = json!({ "jsonrpc": "2.0", "id": msg["id"], "result": result });
     let mut resp = if s.sse.load(Ordering::SeqCst) {
