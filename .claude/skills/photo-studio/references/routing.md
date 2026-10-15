@@ -37,7 +37,10 @@ kind of shot.
 | Reframe / extend to another aspect ratio | `grok-imagine-image-2` | `gpt-image-2-5-sunburst` | Docs (Grok) | Grok's Smart Resize is built for it but tops out at 2K and has no 4:5 or 21:9; use Sunburst (has 21:9, 4K) for those or for a 4K master; check faces after either |
 | Background removal, region edits on objects | `grok-imagine-image-2` | `ideogram-4-5` | Docs | not on skin-critical work |
 | Matched set from one brief (lookbook, series) | `kling-3-omni` (`resultType: series`) | `nano-banana-pro` | Docs | lock look with a reference sheet for people |
-| Stylised, anime, illustration, Asian-leaning aesthetics | `byte-plus-seedream-5-pro` | `byte-plus-seedream-4-5` | Docs | not the first pick for photoreal people from scratch |
+| Editorial illustration: gouache, painterly, flat shapes | `byte-plus-seedream-5-pro` | `nano-banana-pro` | Lab (1 image each) | Seedream 5 Pro 27, NB Pro 25 of 30: real dry-brush texture, kept the named palette. Sunburst laid a fake impasto/pixel filter over the drawing (15); Seedream 4.5 pasted digital lens blur into the painting; Ideogram ignored the palette |
+| Anime, 2D key visual, cel shading | `byte-plus-seedream-5-pro` | `gpt-image-2-5-sunburst` | Lab (1 image each) | Seedream 5 Pro 23, Sunburst 21 (great sky, but garbage text and grunge texture), Seedream 4.5 and NB Pro 19, Ideogram 15. All slipped on small logic (shared headphones, limbs): check props and hands |
+| Children's book, watercolour, ink | `nano-banana-pro` | `gpt-image-2-5-sunburst` | Lab (1 image each; Seedream 5 Pro and Ideogram untested) | NB Pro 27: real blooms, backruns, granulation and white paper; Sunburst 24: beautifully drawn but overworked and sharpened; Seedream 4.5 22: digital-brush look |
+| Stylised, Asian-leaning aesthetics, fantasy | `byte-plus-seedream-5-pro` | `byte-plus-seedream-4-5` | Docs | not the first pick for photoreal people from scratch |
 | Precise facial anatomy (specific face shape or features from a description) | `nano-banana-pro` | `wan2-7-image` | OpenArt's description only, contradicted by Lab | Wan was last in both people tests (glossy, HDR-crunched, wrong shadows). Use only when the face description is the whole job, and review hard |
 
 **Not on OpenArt MCP (2026-10-15): FLUX 3.** The owner rates it highly for edits, and one

@@ -42,6 +42,13 @@ From our blind bake-off (31 images, routing.md): these gave images away most oft
 3. **Teeth and signs:** uniform veneer teeth; gibberish or kitsch text on background signs. Zoom
    on mouths and on any lettering.
 
+### Illustration tells
+
+From the illustration bake-off: texture laid on as a filter (fake impasto, pixel dabs, digital
+lens blur inside a painting) instead of built by the medium; construction that breaks where hands,
+limbs and props meet; unprompted or garbled text and props. For a painted medium, ask for what the
+medium does physically ("dry-brush edges, paper grain showing through, colour pooling in blooms").
+
 ## Defect → fix
 
 | defect | fix |

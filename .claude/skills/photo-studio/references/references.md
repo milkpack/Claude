@@ -52,7 +52,15 @@ Keep the natural skin texture: pores, fine lines and shine as they are.
 (For GPT Image a short "No retouching, no skin smoothing." line works too; Gemini and Ideogram
 follow the positive wording better.)
 
-- One change per call when fidelity matters; batch changes only when they are small and far apart.
+- **Several changes: one pass from the source beats a chain.** In our lab, five edits applied one
+  after another degraded every model: Nano Banana 2.1 picked up a growing warm/magenta cast,
+  lifted blacks and identity drift (judged "destroyed"); Sunburst lost about two thirds of its
+  sharpness and looked re-encoded; Ideogram stayed clean but did edits loosely. The same five
+  changes in **one** call from the original kept faces and grain on all three (Sunburst did all
+  five cleanly; NB 2.1 all five with a small grade shift). So when the client adds a change,
+  re-run from the source with the full list of accepted changes plus the new one.
+- Check every requested change on the output: Ideogram 4.5 silently skipped two of five edits in
+  one pass. It is safest for 1–2 changes.
 - **Restart from the source, don't chain.** Identity and colour drift accumulate with the number of
   chained edits more than with their size. Apply each new change to the original (or the last
   approved master), not to the previous output.
