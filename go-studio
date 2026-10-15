@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Short entry point for the Photo Studio installer (easy to type in a web console):
+#   curl -L raw.githubusercontent.com/milkpack/Claude/HEAD/go-studio | sudo bash
+# Options go after sudo, e.g. `| sudo ANTHROPIC_API_KEY=sk-ant-... bash` (see the installer).
+set -euo pipefail
+curl -fsSL https://raw.githubusercontent.com/milkpack/Claude/HEAD/packaging/photo-studio/deploy/install.sh | bash

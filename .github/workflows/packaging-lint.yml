@@ -5,9 +5,9 @@ name: Packaging lint
 on:
   push:
     branches: [main, release]
-    paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**"]
+    paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**", "go", "go-studio"]
   pull_request:
-    paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**"]
+    paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**", "go", "go-studio"]
   workflow_dispatch:
 
 permissions:
@@ -34,7 +34,7 @@ jobs:
         run: |
           "$RUNNER_TEMP/actionlint" -color
       - name: shellcheck
-        run: shellcheck packaging/*.sh packaging/*/*.sh
+        run: shellcheck packaging/*.sh packaging/*/*.sh packaging/*/deploy/*.sh go go-studio
       - name: PowerShell
         shell: pwsh
         run: |
@@ -51,3 +51,9 @@ jobs:
           sed -e 's/@VERSION@/0.0.0/' -e 's/@DATE@/2026-01-01/' packaging/linux/ai.storyteller.vectorcraft.metainfo.xml.in >"$RUNNER_TEMP/ai.storyteller.vectorcraft.metainfo.xml"
           appstreamcli validate --no-net --explain "$RUNNER_TEMP/ai.storyteller.vectorcraft.metainfo.xml"
           python3 -c "import yaml; m = yaml.safe_load(open('packaging/linux/flatpak/ai.storyteller.vectorcraft.yml')); assert m['id'] == 'ai.storyteller.vectorcraft' and m['command'] == 'vectorcraft'"
+      - name: Compose files
+        run: |
+          for f in packaging/*/docker-compose.yml packaging/*/deploy/docker-compose.yml; do
+            python3 -c "import sys, yaml; assert 'services' in yaml.safe_load(open(sys.argv[1]))" "$f"
+            echo "ok $f"
+          done

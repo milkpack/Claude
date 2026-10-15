@@ -2,3 +2,9 @@ target
 dist
 collab-data
 .git
+**/node_modules
+photo-studio-data
+apps/photo-studio/web/dist
+apps/photo-studio/web/dist-mock
+apps/photo-studio/web/test-results
+apps/photo-studio/web/playwright-report

@@ -83,7 +83,11 @@ $DOMAIN {
 	}
 	reverse_proxy 127.0.0.1:1234
 }
+
+# Other sites on this server (e.g. Photo Studio) live in /etc/caddy/sites/.
+import /etc/caddy/sites/*.caddy
 EOF
+mkdir -p /etc/caddy/sites
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 ||
   die "Caddyfile не прошёл проверку: caddy validate --config /etc/caddy/Caddyfile"
 
@@ -111,6 +115,7 @@ systemctl enable caddy >/dev/null
 systemctl restart caddy
 
 say "Ежедневный бэкап документов (03:30, хранится 14 дней)"
+# shellcheck disable=SC2016 # $(date ...) is for cron to expand, not this script
 printf '30 3 * * * root tar -czf %s/backups/data-$(date +\\%%F).tar.gz -C %s data && find %s/backups -name "data-*.tar.gz" -mtime +14 -delete\n' \
   "$DIR" "$DIR" "$DIR" > /etc/cron.d/vectorcraft-backup
 

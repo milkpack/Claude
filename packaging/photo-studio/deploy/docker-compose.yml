@@ -1,0 +1,22 @@
+# Production stack: the Photo Studio container. Caddy (HTTPS) runs on the host from the Ubuntu
+# package and proxies to 127.0.0.1:8787. Installed into /opt/photo-studio by install.sh; settings
+# come from .env next to this file (0600: it holds the owner's password and the Anthropic key).
+services:
+  photo-studio:
+    image: ${IMAGE:-ghcr.io/milkpack/photo-studio:latest}
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+      PHOTO_STUDIO_PASSWORD: ${PHOTO_STUDIO_PASSWORD:?set PHOTO_STUDIO_PASSWORD in .env}
+      PHOTO_STUDIO_PUBLIC_URL: ${PHOTO_STUDIO_PUBLIC_URL:?set PHOTO_STUDIO_PUBLIC_URL in .env}
+      # Empty means "not set": without the key the director and review nodes are off.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      PHOTO_STUDIO_CLAUDE_MODEL: ${PHOTO_STUDIO_CLAUDE_MODEL:-}
+      PHOTO_STUDIO_CLAUDE_EFFORT: ${PHOTO_STUDIO_CLAUDE_EFFORT:-}
+      # Caddy on the host is the only client, so the last X-Forwarded-For entry is the real
+      # visitor (the login rate limit is per visitor, not per proxy). Same as --trust-proxy.
+      PHOTO_STUDIO_TRUST_PROXY: "1"
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8787:8787"

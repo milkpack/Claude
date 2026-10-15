@@ -209,3 +209,37 @@ App mode: any workflow can be switched to a form that shows only the nodes marke
 
 Panels: library (all assets, filter by kind/model), job queue, account (OpenArt balance, Claude
 status), settings (connect/reconnect OpenArt).
+
+## Deploy
+
+One image, `ghcr.io/milkpack/photo-studio` (`packaging/photo-studio/Dockerfile`: the front-end
+built with pnpm, the server with cargo, both in a Debian slim runtime), built and pushed by
+`.github/workflows/photo-studio-image.yml` on every push that touches the app, the photo skill or
+the packaging. On the VPS (Ubuntu 22.04/24.04, as root; it can share the server with VectorCraft
+Cloud):
+
+```sh
+# first install: a password is generated and printed once at the end
+curl -L raw.githubusercontent.com/milkpack/Claude/HEAD/go-studio | sudo ANTHROPIC_API_KEY=sk-ant-... bash
+# same thing without the short entry point; options go after sudo
+curl -fsSL https://raw.githubusercontent.com/milkpack/Claude/HEAD/packaging/photo-studio/deploy/install.sh \
+  | sudo DOMAIN=photo.example.com ANTHROPIC_API_KEY=sk-ant-... bash
+# update to the latest image (keeps the password, the key, the OpenArt connection and the data)
+curl -L raw.githubusercontent.com/milkpack/Claude/HEAD/go-studio | sudo bash
+```
+
+`install.sh` puts everything in `/opt/photo-studio` (`docker-compose.yml`, `.env` with mode 0600,
+`data/`, `backups/` with a daily tarball kept 14 days), runs the container on `127.0.0.1:8787`
+with `--trust-proxy`, and serves it over HTTPS with the host's Caddy. The domain is `DOMAIN`, else
+`photo.<ip>.sslip.io`; `PHOTO_STUDIO_PUBLIC_URL` is `https://<domain>`, and OpenArt sign-in only
+works at that exact address. Without `ANTHROPIC_API_KEY` the director and review nodes are off
+(run the installer again with the key to turn them on). Then open the site, sign in with the
+password, and connect OpenArt in Settings → Connect OpenArt.
+
+The Caddy site goes to `/etc/caddy/sites/photo-studio.caddy`; the main Caddyfile only gets an
+`import /etc/caddy/sites/*.caddy` line, so a VectorCraft site in it is kept. The VectorCraft
+installer rewrites the Caddyfile without that line: run the Photo Studio installer again afterwards
+to restore it.
+
+Locally: `docker build -f packaging/photo-studio/Dockerfile -t photo-studio .` and
+`docker run -p 8787:8787 -v ps-data:/data -e PHOTO_STUDIO_PASSWORD='at least 12 chars' photo-studio`.
