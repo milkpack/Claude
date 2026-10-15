@@ -40,6 +40,12 @@ kind of shot.
 | Stylised, anime, illustration, Asian-leaning aesthetics | `byte-plus-seedream-5-pro` | `byte-plus-seedream-4-5` | Docs | not the first pick for photoreal people from scratch |
 | Precise facial anatomy (specific face shape or features from a description) | `nano-banana-pro` | `wan2-7-image` | OpenArt's description only, contradicted by Lab | Wan was last in both people tests (glossy, HDR-crunched, wrong shadows). Use only when the face description is the whole job, and review hard |
 
+**Not on OpenArt MCP (2026-10-15): FLUX 3.** The owner rates it highly for edits, and one
+practitioner drift test put it next to Ideogram 4.5 for small edits. It can't be called through
+this MCP; if a FLUX provider (BFL or fal) is added to Photo Studio, it becomes the A/B partner for
+the precise-edit and expression-change rows. Re-check `openart_model_list` occasionally: OpenArt
+adds models without notice.
+
 Never route photoreal people to `nano-banana-2-lite` (no character slots) or Wan by default.
 
 ## Chains
