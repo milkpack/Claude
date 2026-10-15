@@ -1,0 +1,31 @@
+[package]
+name = "photo-studio"
+description = "Photo Studio: a private node canvas for photographic image generation (OpenArt models, Claude as director and reviewer)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "photo-studio"
+path = "src/main.rs"
+
+[dependencies]
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# HTTP API, static files and multipart uploads on one port (hyper underneath).
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json", "query", "multipart"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs", "io-util"] }
+# Outbound HTTPS (OpenArt OAuth + MCP, CDN downloads, Anthropic API): rustls with the ring provider, no OpenSSL.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+sha2 = "0.10.9"
+base64 = "0.22.1"
+rand = "0.9.5"
+# Thumbnails and downscaled copies for Claude: decode png/jpeg/webp, encode jpeg.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+env_logger = { version = "0.11.11", default-features = false, features = ["humantime"] }
