@@ -18,6 +18,7 @@ mod oauth;
 mod openart;
 mod prompts;
 mod review;
+mod routine;
 mod server;
 mod skill;
 mod static_files;
@@ -103,6 +104,8 @@ async fn run(cli: Cli) -> Result<(), String> {
         trust_proxy: cli.trust_proxy,
         timing: jobs::JobTiming::default(),
         allow_private_urls: false,
+        routine_env: cli.routine,
+        routine_timeout: std::time::Duration::from_secs(30),
     };
     let app = server::build(opts)?;
     let addr = format!("{}:{}", cli.host, cli.port);

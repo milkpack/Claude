@@ -9,6 +9,7 @@ mod misc_tests;
 mod mock;
 mod openart_tests;
 mod regression_tests;
+mod routine_tests;
 mod upload_tests;
 
 use std::path::{Path, PathBuf};
@@ -35,6 +36,7 @@ pub struct Config {
     pub skill: Option<Skill>,
     pub data_dir: Option<PathBuf>,
     pub give_up: Option<Duration>,
+    pub routine_env: Option<(String, String)>,
 }
 
 pub struct TestServer {
@@ -79,6 +81,8 @@ impl TestServer {
                 give_up: cfg.give_up.unwrap_or(Duration::from_secs(60)),
             },
             allow_private_urls: true,
+            routine_env: cfg.routine_env.clone(),
+            routine_timeout: Duration::from_millis(400),
         };
         let a = server::build(opts).unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();

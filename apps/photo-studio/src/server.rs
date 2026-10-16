@@ -62,6 +62,10 @@ pub struct Options {
     /// Accept plain http and private addresses for upstream URLs (tests against local mocks
     /// only; always `false` in the binary).
     pub allow_private_urls: bool,
+    /// Routine URL and token from the environment (settings saved in the app win).
+    pub routine_env: Option<(String, String)>,
+    /// How long a routine fire may take.
+    pub routine_timeout: Duration,
 }
 
 /// Shortest accepted owner password.
@@ -93,6 +97,7 @@ pub struct App {
     pub token_limit: auth::WindowLimiter,
     /// Unknown or wrong tokens, per client.
     pub bad_token_limit: auth::WindowLimiter,
+    pub routine: crate::routine::Routine,
 }
 
 /// Public `/t/*` requests allowed per client per minute.
@@ -149,6 +154,7 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
         public_url: public,
         token_limit: auth::WindowLimiter::new(TOKEN_REQUESTS_PER_MINUTE, 60_000),
         bad_token_limit: auth::WindowLimiter::new(BAD_TOKENS_PER_MINUTE, 60_000),
+        routine: crate::routine::Routine::load(secrets.join("routine.json"), opts.routine_env, opts.allow_private_urls, opts.routine_timeout)?,
     }))
 }
 
@@ -174,6 +180,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/tasks/{id}", get(crate::handoff::get_task))
         .route("/api/tasks/{id}/result", post(crate::handoff::task_result).layer(DefaultBodyLimit::max(crate::tasks::RESULT_BODY_LIMIT)))
         .route("/api/tasks/{id}/cancel", post(crate::handoff::cancel_task))
+        .route("/api/tasks/{id}/fire", post(crate::handoff::fire_task))
+        .route("/api/settings/routine", get(crate::handoff::routine_status).post(crate::handoff::routine_save).delete(crate::handoff::routine_clear))
         .route("/api/tasks/{id}/files/{name}", get(crate::handoff::task_file))
         .route_layer(from_fn_with_state(app.clone(), auth::require_session));
     Router::new()
@@ -244,6 +252,7 @@ async fn me_json(app: &App, authenticated: bool) -> Value {
             "authenticated": false,
             "openart": { "connected": false, "needsReconnect": false },
             "claude": { "configured": false, "model": "" },
+            "routine": { "configured": false },
         });
     }
     let (connected, needs_reconnect) = app.openart.oauth.status().await;
@@ -264,6 +273,7 @@ async fn me_json(app: &App, authenticated: bool) -> Value {
         "authenticated": true,
         "openart": openart,
         "claude": { "configured": app.claude.is_some(), "model": app.claude_model },
+        "routine": { "configured": app.routine.configured() },
     })
 }
 

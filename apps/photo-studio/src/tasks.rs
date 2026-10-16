@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::Multipart;
@@ -117,6 +117,9 @@ pub struct StoredTask {
     pub expires_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<StoredResult>,
+    /// The last cloud run (routine fire) of this task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<crate::routine::RunState>,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -238,6 +241,9 @@ pub fn task_json(app: &App, t: &StoredTask) -> Value {
         "createdAt": t.created_at,
         "updatedAt": t.updated_at,
     });
+    if let Some(run) = &t.run {
+        v["run"] = serde_json::to_value(run).unwrap_or(Value::Null);
+    }
     if let Some(r) = &t.result {
         let assets: Vec<Value> = r.asset_ids.iter().filter_map(|id| app.assets.get(id)).filter_map(|a| serde_json::to_value(a.api()).ok()).collect();
         let files: Vec<Value> =
@@ -285,6 +291,9 @@ pub struct CreateTask {
     pub inputs: Vec<InputSpec>,
     #[serde(default)]
     pub context: Option<Value>,
+    /// Send the task to the cloud routine right away (when one is set up).
+    #[serde(default)]
+    pub auto: bool,
 }
 
 fn clean_line(s: &str, max: usize) -> String {
@@ -292,7 +301,7 @@ fn clean_line(s: &str, max: usize) -> String {
 }
 
 /// `POST /api/tasks`.
-pub async fn create(app: &App, req: CreateTask) -> ApiResult<StoredTask> {
+pub async fn create(app: &Arc<App>, req: CreateTask) -> ApiResult<StoredTask> {
     if !store::valid_id(&req.session_id) || !app.workflows.exists(&req.session_id) {
         return Err(ApiError::bad_request("unknown session"));
     }
@@ -350,6 +359,7 @@ pub async fn create(app: &App, req: CreateTask) -> ApiResult<StoredTask> {
         token: store::new_token(),
         expires_at: now.saturating_add(TOKEN_TTL_MS),
         result: None,
+        run: None,
         created_at: now,
         updated_at: now,
     };
@@ -364,7 +374,51 @@ pub async fn create(app: &App, req: CreateTask) -> ApiResult<StoredTask> {
     task.prompt = crate::prompts::build(app, &task, &instructions, context.as_ref(), models.as_deref());
     let task = app.tasks.save(task).await?;
     info!("task {} created ({:?})", task.id, task.kind);
+    if req.auto {
+        return fire(app, &task.id).await;
+    }
     Ok(task)
+}
+
+/// Kinds a cloud session can do by itself (the others need Blender or Photoshop on a computer).
+pub fn cloud_kind(kind: TaskKind) -> bool {
+    matches!(kind, TaskKind::Director | TaskKind::Review | TaskKind::Sketch | TaskKind::Custom)
+}
+
+/// Send task `id` to the cloud routine once and record the outcome on the task. The fire and
+/// the save run in their own task, so a dropped request can't lose the record of a started run.
+pub async fn fire(app: &Arc<App>, id: &str) -> ApiResult<StoredTask> {
+    let t = app.tasks.get(id).ok_or_else(|| ApiError::not_found("no such task"))?;
+    check_open(&t)?;
+    if t.expired() {
+        return Err(ApiError::new(StatusCode::GONE, "bad_request", "this task's links have expired: create a new task"));
+    }
+    let run = if !cloud_kind(t.kind) {
+        Some(crate::routine::RunState::failed("cloud runs do director, review, sketch and custom tasks; this one needs a local tool"))
+    } else if !app.routine.configured() {
+        Some(crate::routine::RunState::failed("cloud runs aren't set up (Settings → Cloud runs)"))
+    } else {
+        match crate::routine::fire_text(&t.prompt) {
+            Ok(_) => None,
+            Err(e) => Some(crate::routine::RunState::failed(e)),
+        }
+    };
+    let app = app.clone();
+    let id = t.id.clone();
+    let handle = tokio::spawn(async move {
+        let run = match run {
+            Some(r) => r,
+            None => {
+                let text = crate::routine::fire_text(&t.prompt).unwrap_or_default();
+                app.routine.fire(&text).await
+            }
+        };
+        let _g = app.tasks.write.lock().await;
+        let mut current = app.tasks.get(&id).ok_or_else(|| ApiError::not_found("no such task"))?;
+        current.run = Some(run);
+        app.tasks.save(current).await
+    });
+    handle.await.map_err(|e| ApiError::internal(format!("fire task: {e}")))?
 }
 
 pub async fn cancel(app: &App, id: &str) -> ApiResult<StoredTask> {

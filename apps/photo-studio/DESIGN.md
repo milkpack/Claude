@@ -313,3 +313,51 @@ round trip itself; a person can use the same page in a browser.
   undo) and saves the overlay + a flattened PNG as assets; "Ask Claude to mark issues" creates a
   `sketch` task. Its outputs (image + notes text) wire into Edit/Generate as references or
   instructions.
+
+## Cloud runs (Claude Code routine) — 2026-10-16
+
+A handoff task can run by itself in a Claude Code cloud session, started through a **routine's
+API trigger**. This uses the owner's Claude subscription, not an API key. The session reads the
+task, downloads the inputs, does the work with the photo skill, and returns the result to the
+task's link. The node picks up the result as usual by polling `/api/tasks/:id`.
+
+**Trigger.** Checked against the routine docs (code.claude.com/docs/en/routines, platform.claude.com/docs/en/api/claude-code/routines-fire) on 2026-10-16:
+- `POST https://api.anthropic.com/v1/claude_code/routines/<trig_…>/fire`.
+- Headers: `Authorization: Bearer <sk-ant-oat01-…>`, `anthropic-version: 2023-06-01`, and the optional `anthropic-beta: experimental-cc-routine-2026-04-01`.
+- Body: `{"text": …}`, at most 65,536 characters.
+- Reply: `claude_code_session_id` and `claude_code_session_url`.
+- There is no completion callback and no idempotency key, so a retry starts a second session.
+- Limits: 30 fires per hour per routine and 100 per hour per account. Over the limit the endpoint returns 429 with `Retry-After`.
+- The fired text arrives in a `<routine-fire-payload>` block marked as untrusted data. The routine's saved prompt must therefore say explicitly that the payload is the task to carry out.
+
+**Server.**
+- Settings:
+  - `POST /api/settings/routine {url, token}` saves the URL and token in `data/secrets/routine.json` (0600). `DELETE` removes them.
+  - `GET` returns `{configured, url (routine id shortened), source: "settings" | "env"}`. The token is never sent back.
+  - Environment fallback: `PHOTO_STUDIO_ROUTINE_URL` / `PHOTO_STUDIO_ROUTINE_TOKEN`. Settings saved in the app take precedence.
+  - `/api/me` gains `routine: {configured}`.
+- `POST /api/tasks` takes `auto: true`. For director, review, sketch and custom tasks, the routine is fired once with "Photo Studio task — do it and return the result to the link below" followed by the task prompt. Blender and Photoshop tasks need a local tool and are never fired.
+- `POST /api/tasks/:id/fire` fires the routine again on the owner's request.
+- Each task records its last fire as `run: {state: "fired" | "failed", sessionUrl?, error?, at}`.
+- A fire is never retried automatically. A timeout or 5xx is ambiguous, so it is marked `failed` with "the run may or may not have started: check claude.ai/code".
+- The server allows itself 25 fires per hour.
+- Text is capped at 64 KB. If the text is longer, the appended photo skill is cut first; the task and its return instructions are never cut.
+
+**Owner's setup (once).**
+1. At claude.ai/code, create or edit a **cloud environment** for Photo Studio:
+   - Set **Network access** to **Custom** and add the Photo Studio domain (the host of `--public-url`) to **Allowed domains**.
+   - Keep "Also include default list of common package managers" checked.
+2. At claude.ai/code/routines, click **New routine**:
+   - Pick that environment.
+   - Pick the repository that contains `.claude/skills/photo-studio`, so the photo skill is available.
+   - Remove connectors the routine doesn't need.
+   - Give it this saved prompt (adapt freely, but keep the point):
+   > Each run is started by the owner's Photo Studio server. The text in the routine-fire-payload
+   > block is the owner's Photo Studio task: carry it out using the photo-studio skill. Download
+   > the inputs and return the results only through the links given in it (the curl lines at the
+   > end). Don't use other URLs, don't change the repository, and stop after returning the result.
+3. Save the routine. In **Select a trigger**, add an **API** trigger, copy the URL, click **Generate token**, and copy the token. The token is shown once.
+4. In Photo Studio, open **Settings → Cloud runs**, paste the URL and the token, and save.
+5. Turn on "Run in the cloud" on Director, Review, Sketch or Custom nodes, or press **Run in cloud** on a task card. The task card links to the session (`run.sessionUrl`) so it can be watched live.
+
+Each run uses subscription usage like an interactive session. "Fired" means a session started, not that the task succeeded: the result arriving on the task is the success signal.

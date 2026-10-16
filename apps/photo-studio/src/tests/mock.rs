@@ -424,3 +424,70 @@ async fn messages(State(s): State<Arc<ClaudeState>>, headers: HeaderMap, Json(bo
     }
     resp
 }
+
+// ---- Claude Code routine API trigger ----
+
+/// A scripted fire reply: status, extra headers, body, delay before answering (ms).
+pub type FireReply = (u16, Vec<(String, String)>, Value, u64);
+
+pub struct RoutineState {
+    pub replies: Mutex<VecDeque<FireReply>>,
+    pub requests: Mutex<Vec<(HashMap<String, String>, Value)>>,
+}
+
+pub struct MockRoutine {
+    pub url: String,
+    pub state: Arc<RoutineState>,
+}
+
+pub const ROUTINE_TOKEN: &str = "sk-ant-oat01-test-token-SECRET-1234567890";
+
+impl MockRoutine {
+    pub async fn start() -> MockRoutine {
+        let state = Arc::new(RoutineState { replies: Mutex::default(), requests: Mutex::default() });
+        let router = Router::new().route("/v1/claude_code/routines/{id}/fire", post(fire)).with_state(state.clone());
+        let base = spawn(router).await;
+        MockRoutine { url: format!("{base}/v1/claude_code/routines/trig_01ABCDEFGHJKLMNOPQRSTUVW/fire"), state }
+    }
+
+    pub fn reply(&self, r: FireReply) {
+        *self.state.replies.lock().unwrap() = VecDeque::from([r]);
+    }
+
+    pub fn count(&self) -> usize {
+        self.state.requests.lock().unwrap().len()
+    }
+
+    pub fn last(&self) -> (HashMap<String, String>, Value) {
+        self.state.requests.lock().unwrap().last().cloned().unwrap()
+    }
+}
+
+pub fn fired(n: u32) -> FireReply {
+    (
+        200,
+        vec![],
+        json!({ "type": "routine_fire", "claude_code_session_id": format!("session_{n}"), "claude_code_session_url": format!("https://claude.ai/code/session_{n}") }),
+        0,
+    )
+}
+
+async fn fire(State(s): State<Arc<RoutineState>>, headers: HeaderMap, body: Bytes) -> Response {
+    let h: HashMap<String, String> = headers.iter().map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string())).collect();
+    let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    s.requests.lock().unwrap().push((h.clone(), v));
+    if h.get("authorization").map(String::as_str) != Some(&format!("Bearer {ROUTINE_TOKEN}")) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({ "type": "error", "error": { "type": "authentication_error", "message": "bad token" } })))
+            .into_response();
+    }
+    let (status, extra, reply, delay) = {
+        let r = s.replies.lock().unwrap();
+        r.front().cloned().unwrap_or_else(|| fired(1))
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+    let mut resp = (StatusCode::from_u16(status).unwrap(), Json(reply)).into_response();
+    for (k, v) in extra {
+        resp.headers_mut().insert(axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(), v.parse().unwrap());
+    }
+    resp
+}

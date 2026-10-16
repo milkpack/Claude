@@ -9,6 +9,9 @@ use serde_json::Value;
 use crate::server::App;
 use crate::tasks::{StoredTask, TaskKind, input_url, return_url};
 
+/// Where the appended photo skill starts in a prompt (cloud runs cut from here first).
+pub const SKILL_MARKER: &str = "\n---\n\n# The photo skill\n\n";
+
 /// `YYYY-MM-DD HH:MM UTC` for milliseconds since the epoch.
 pub fn utc(ms: u64) -> String {
     let secs = ms / 1000;
@@ -192,7 +195,7 @@ A person can open {ret} in a browser and use the form instead. The links need no
     ));
 
     if wants_skill(task.kind) && !app.skill_text.is_empty() {
-        p.push_str("\n---\n\n# The photo skill\n\n");
+        p.push_str(SKILL_MARKER);
         p.push_str(&app.skill_text);
     }
     p

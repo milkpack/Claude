@@ -35,6 +35,8 @@ ENVIRONMENT:
     ANTHROPIC_API_KEY           Enables the director and review nodes
     PHOTO_STUDIO_CLAUDE_MODEL   Claude model [default: claude-opus-5-5]
     PHOTO_STUDIO_CLAUDE_EFFORT  low | medium | high | xhigh | max [default: medium]
+    PHOTO_STUDIO_ROUTINE_URL    Cloud runs: the routine's API trigger URL (with ..._TOKEN)
+    PHOTO_STUDIO_ROUTINE_TOKEN  Cloud runs: the routine's bearer token
     RUST_LOG                    Log level [default: info]";
 
 pub const DEFAULT_MCP_URL: &str = "https://mcp.openart.ai/mcp";
@@ -58,6 +60,8 @@ pub struct Cli {
     pub openart_issuer: Option<String>,
     pub anthropic_base_url: String,
     pub trust_proxy: bool,
+    /// Cloud-run routine (URL, token) from the environment.
+    pub routine: Option<(String, String)>,
 }
 
 impl std::fmt::Debug for Cli {
@@ -77,6 +81,7 @@ impl std::fmt::Debug for Cli {
             .field("openart_issuer", &self.openart_issuer)
             .field("anthropic_base_url", &self.anthropic_base_url)
             .field("trust_proxy", &self.trust_proxy)
+            .field("routine", &self.routine.as_ref().map(|(u, _)| crate::routine::mask_url(u)))
             .finish()
     }
 }
@@ -150,6 +155,11 @@ impl Cli {
             return Err(CliError::Bad(format!("PHOTO_STUDIO_PASSWORD must have at least {} characters", crate::server::MIN_PASSWORD_CHARS)));
         }
         let anthropic_api_key = env("ANTHROPIC_API_KEY");
+        let routine = match (env("PHOTO_STUDIO_ROUTINE_URL"), env("PHOTO_STUDIO_ROUTINE_TOKEN")) {
+            (Some(u), Some(t)) => Some((u, t)),
+            (None, None) => None,
+            _ => return Err(CliError::Bad("set both PHOTO_STUDIO_ROUTINE_URL and PHOTO_STUDIO_ROUTINE_TOKEN, or neither".into())),
+        };
         let claude_model = env("PHOTO_STUDIO_CLAUDE_MODEL").unwrap_or_else(|| DEFAULT_CLAUDE_MODEL.into());
         let claude_effort = env("PHOTO_STUDIO_CLAUDE_EFFORT").unwrap_or_else(|| DEFAULT_CLAUDE_EFFORT.into());
         if !["low", "medium", "high", "xhigh", "max"].contains(&claude_effort.as_str()) {
@@ -170,6 +180,7 @@ impl Cli {
             openart_issuer,
             anthropic_base_url,
             trust_proxy,
+            routine,
         })
     }
 }

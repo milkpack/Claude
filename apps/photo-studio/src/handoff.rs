@@ -104,6 +104,34 @@ pub async fn task_file(State(app): State<Arc<App>>, Path((id, name)): Path<(Stri
     Ok(resp)
 }
 
+pub async fn fire_task(State(app): State<Arc<App>>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+    find(&app, &id)?;
+    let t = tasks::fire(&app, &id).await?;
+    Ok(Json(tasks::task_json(&app, &t)))
+}
+
+// ---- cloud run settings (the token never comes back) ----
+
+pub async fn routine_status(State(app): State<Arc<App>>) -> Json<Value> {
+    Json(app.routine.status())
+}
+
+#[derive(Deserialize)]
+pub struct RoutineBody {
+    url: String,
+    token: String,
+}
+
+pub async fn routine_save(State(app): State<Arc<App>>, JsonBody(body): JsonBody<RoutineBody>) -> ApiResult<Json<Value>> {
+    app.routine.save(&body.url, &body.token).await?;
+    Ok(Json(app.routine.status()))
+}
+
+pub async fn routine_clear(State(app): State<Arc<App>>) -> ApiResult<Json<Value>> {
+    app.routine.clear().await?;
+    Ok(Json(app.routine.status()))
+}
+
 // ---- token routes ----
 
 fn harden(mut resp: Response, html: bool) -> Response {
