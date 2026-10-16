@@ -96,7 +96,7 @@ export function validConnection(c: Connection | AppEdge, nodes: AppNode[], edges
 
 export const useGraph = create<GraphState>((set, get) => ({
   workflowId: null,
-  name: 'Untitled workflow',
+  name: 'Untitled session',
   nodes: [],
   edges: [],
   viewport: null,

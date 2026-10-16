@@ -47,6 +47,28 @@ export const PORTS: Record<NodeKind, PortSet> = {
     outputs: [{ id: 'image', type: 'image', label: 'winner' }],
   },
   output: { inputs: [{ id: 'image', type: 'image', label: 'image', multi: true }], outputs: [] },
+  blender: {
+    inputs: [
+      { id: 'refs', type: 'image', label: 'references', multi: true, optional: true },
+      { id: 'brief', type: 'text', label: 'brief', multi: true, optional: true },
+    ],
+    outputs: [{ id: 'images', type: 'image', label: 'renders' }],
+  },
+  photoshop: {
+    inputs: [
+      { id: 'source', type: 'image', label: 'source' },
+      { id: 'refs', type: 'image', label: 'references', multi: true, optional: true },
+      { id: 'prompt', type: 'text', label: 'instruction', multi: true, optional: true },
+    ],
+    outputs: [{ id: 'images', type: 'image', label: 'edited' }],
+  },
+  sketch: {
+    inputs: [{ id: 'image', type: 'image', label: 'image' }],
+    outputs: [
+      { id: 'image', type: 'image', label: 'marked' },
+      { id: 'notes', type: 'text', label: 'notes' },
+    ],
+  },
 };
 
 export function portOf(kind: string | undefined, side: 'in' | 'out', handle: string | null | undefined): Port | undefined {

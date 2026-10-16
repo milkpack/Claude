@@ -88,7 +88,7 @@ for (const theme of THEMES) {
       }
 
       const review = page.getByTestId('node-review');
-      await review.getByRole('button', { name: 'Review', exact: true }).click();
+      await review.getByRole('button', { name: 'Create review task' }).click();
       await expect(review.locator('.scores')).toBeVisible({ timeout: 60_000 });
       await expect(review.locator('.review-thumb')).toHaveCount(8, { timeout: 60_000 });
       if (size.name === 'desktop') {
@@ -116,7 +116,7 @@ for (const theme of THEMES) {
         await page.getByRole('button', { name: /Portrait \/ headshot/ }).click();
         await page.getByTestId('node-director').waitFor();
         await pickFromLibrary(page, 0, 8);
-        await page.getByTestId('node-director').getByRole('button', { name: 'Direct the shot' }).click();
+        await page.getByTestId('node-director').getByRole('button', { name: 'Create task for Claude' }).click();
         await expect(page.getByTestId('node-director').locator('.plan li')).toHaveCount(2, { timeout: 30_000 });
         const gen = page.getByTestId('node-generate');
         await expect(gen.locator('.cost-main')).toContainText('cr');

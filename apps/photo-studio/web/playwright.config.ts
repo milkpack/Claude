@@ -18,7 +18,7 @@ export default defineConfig({
   webServer: {
     command: 'pnpm build:mock && pnpm preview:mock',
     url: `http://127.0.0.1:${port}`,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 180_000,
   },
 });

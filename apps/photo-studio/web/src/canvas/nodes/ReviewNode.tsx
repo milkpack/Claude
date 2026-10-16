@@ -10,6 +10,8 @@ import { useMe } from '../../api/queries';
 import { useUi } from '../../state/ui';
 import { Button, SectionLabel } from '../../components/ui';
 import { NodeShell } from './NodeShell';
+import { TaskCard } from '../TaskCard';
+import { ViaChips } from './ViaChips';
 
 const SCORE_LABELS: [keyof ReviewResponse['scores'], string][] = [
   ['realism', 'Realism'],
@@ -78,17 +80,20 @@ export function ReviewNode({ id, data, selected }: NodeProps<Extract<AppNode, { 
       done={d.order.length > 0}
       phase={rt?.total ? `${(rt.done ?? 0) + 1} / ${rt.total}` : undefined}
     >
-      {me.data && !me.data.claude.configured ? <p className="hint warn">Claude is not configured on the server, so Review cannot run.</p> : null}
+      <ViaChips id={id} via={d.via} claudeOff={Boolean(me.data && !me.data.claude.configured)} />
       {!d.order.length ? (
-        <>
-          <p className="hint">
-            {images.length ? `${images.length} image${images.length === 1 ? '' : 's'} to review${ins.images.source?.length ? ' against the source' : ''}.` : 'Connect generated images (and the source for edits).'}
-          </p>
-          <Button variant="primary" size="sm" className="nodrag full" busy={Boolean(rt)} disabled={Boolean(rt) || !images.length} onClick={() => void runNode(id)}>
-            {rt ? 'Reviewing' : 'Review'}
-          </Button>
-        </>
-      ) : (
+        <p className="hint">
+          {images.length ? `${images.length} image${images.length === 1 ? '' : 's'} to review${ins.images.source?.length ? ' against the source' : ''}.` : 'Connect generated images (and the source for edits).'}
+        </p>
+      ) : null}
+      {(me.data && !me.data.claude.configured) || d.via !== 'direct' ? (
+        <TaskCard id={id} kind="review" task={d.handoff} applied={d.handoffApplied} createLabel="Create review task" />
+      ) : !d.order.length ? (
+        <Button variant="primary" size="sm" className="nodrag full" busy={Boolean(rt)} disabled={Boolean(rt) || !images.length} onClick={() => void runNode(id)}>
+          {rt ? 'Reviewing' : 'Review'}
+        </Button>
+      ) : null}
+      {!d.order.length ? null : (
         <>
           <div className="review-summary mono">
             {(['accept', 'retry', 'rethink'] as const).map((v) => (counts[v] ? <span key={v} className={`verdict-count verdict-${v}`}>{counts[v]} {v}</span> : null))}

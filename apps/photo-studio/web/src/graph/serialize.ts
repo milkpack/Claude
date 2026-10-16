@@ -48,7 +48,7 @@ export function fromGraph(g: unknown): { nodes: AppNode[]; edges: AppEdge[]; vie
     const data = { ...defaultData(o.type), ...(obj(o.data) ?? {}) } as Record<string, unknown>;
     for (const k of EPHEMERAL) delete data[k];
     // Arrays the UI maps over must be arrays.
-    for (const k of ['runs', 'order', 'change', 'keep', 'picked'])
+    for (const k of ['runs', 'order', 'change', 'keep', 'picked', 'results', 'shapes', 'redo', 'views'])
       if (k in data && !Array.isArray(data[k])) data[k] = [];
     if ('params' in data && !obj(data.params)) data.params = {};
     if ('reviews' in data && !obj(data.reviews)) data.reviews = {};

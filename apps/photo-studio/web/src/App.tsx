@@ -6,7 +6,7 @@ import { qk, queryClient, useMe } from './api/queries';
 import type { Me } from './api/types';
 import { Canvas } from './canvas/Canvas';
 import { ContextMenu } from './canvas/ContextMenu';
-import { bootWorkflow, useAutosave } from './graph/sync';
+import { bootWorkflow, useAutosave, useSessionHash } from './graph/sync';
 import { AppMode } from './panels/AppMode';
 import { LeftPanel } from './panels/LeftPanel';
 import { Login } from './panels/Login';
@@ -23,6 +23,7 @@ function Studio() {
   const leftOpen = useUi((s) => s.leftOpen);
   const rightOpen = useUi((s) => s.rightOpen);
   useAutosave(true);
+  useSessionHash();
 
   useEffect(() => {
     void bootWorkflow();

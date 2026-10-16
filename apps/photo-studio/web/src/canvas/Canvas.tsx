@@ -20,6 +20,9 @@ import { GenerateNode } from './nodes/GenerateNode';
 import { ReviewNode } from './nodes/ReviewNode';
 import { CompareNode } from './nodes/CompareNode';
 import { OutputNode } from './nodes/OutputNode';
+import { BlenderNode } from './nodes/BlenderNode';
+import { PhotoshopNode } from './nodes/PhotoshopNode';
+import { SketchNode } from './nodes/SketchNode';
 import { ConnectionLine, TypedEdge } from './edges';
 import { ASSET_MIME, NODE_MIME, readDraggedAsset, readDraggedKind } from './dnd';
 
@@ -32,6 +35,9 @@ const nodeTypes: NodeTypes = {
   review: ReviewNode,
   compare: CompareNode,
   output: OutputNode,
+  blender: BlenderNode,
+  photoshop: PhotoshopNode,
+  sketch: SketchNode,
 } as NodeTypes;
 
 const edgeTypes: EdgeTypes = { typed: TypedEdge } as EdgeTypes;

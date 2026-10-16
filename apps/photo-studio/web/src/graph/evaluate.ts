@@ -73,6 +73,18 @@ export function nodeOutput(node: AppNode, handle: string, nodes: AppNode[], edge
     }
     case 'output':
       return null;
+    case 'blender':
+    case 'photoshop':
+      return { type: 'image', value: node.data.results.map((asset) => ({ asset, from: node.id, fromKind: node.type })) };
+    case 'sketch': {
+      const d = node.data;
+      if (handle === 'notes') {
+        const notes = [d.notes?.trim(), d.handoff?.result?.text?.trim()].filter(Boolean).join('\n\n');
+        return { type: 'text', value: notes || null };
+      }
+      const img = d.results[0] ?? d.flattened;
+      return { type: 'image', value: img ? [{ asset: img, from: node.id, fromKind: 'sketch' }] : [] };
+    }
     default:
       return null;
   }
@@ -263,6 +275,9 @@ export function hasOutput(node: AppNode): boolean {
       return node.data.runs.length > 0;
     case 'review':
       return node.data.order.length > 0;
+    case 'blender':
+    case 'photoshop':
+      return node.data.results.length > 0;
     default:
       return true;
   }

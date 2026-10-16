@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { LogOut, RefreshCw, Unplug, X } from 'lucide-react';
+import { Cloud, LogOut, RefreshCw, Trash, Unplug, X } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { describeError } from '../api/errors';
 import { qk, queryClient, useMe } from '../api/queries';
@@ -23,6 +24,92 @@ const SHORTCUTS: [string, string][] = [
   ['Shift drag', 'Add to selection'],
   [`${modKey} V (image)`, 'Paste a photo as a Reference'],
 ];
+
+function RoutineSection() {
+  const q = useQuery({ queryKey: ['routine'], queryFn: api.routine, retry: false });
+  const [url, setUrl] = useState('');
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const r = q.data;
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['routine'] });
+    await queryClient.invalidateQueries({ queryKey: qk.me });
+  };
+  return (
+    <section className="set-section">
+      <h3>Cloud runs (Claude routine)</h3>
+      <div className="set-row">
+        <span className={`dot ${r?.configured ? 'dot-ok' : 'dot-off'}`} />
+        <div className="set-text">
+          {r?.configured ? (
+            <>
+              <strong>Configured</strong>
+              <span className="mono muted small">{r.url}</span>
+              {r.source ? <span className="muted small">from {r.source}</span> : null}
+              <span className="muted">Director, Review and Sketch tasks run in the cloud by themselves. Blender and Photoshop stay manual: they need your Mac.</span>
+            </>
+          ) : (
+            <>
+              <strong>Not configured</strong>
+              <span className="muted">Paste the trigger URL and token of a Claude Code routine; tasks then run without copy and paste. The token is stored on the server and never shown again.</span>
+            </>
+          )}
+        </div>
+      </div>
+      <form
+        className="routine-form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!url.trim() || !token.trim()) return;
+          setBusy(true);
+          try {
+            await api.saveRoutine(url.trim(), token.trim());
+            setToken('');
+            setUrl('');
+            await refresh();
+            toast('Cloud runs configured', 'ok');
+          } catch (err) {
+            toast(describeError(err).detail, 'error');
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <label className="login-field">
+          <span>Routine URL</span>
+          <input className="mono" value={url} placeholder={r?.url ?? 'https://…'} onChange={(e) => setUrl(e.target.value)} autoComplete="off" />
+        </label>
+        <label className="login-field">
+          <span>Token</span>
+          <input type="password" value={token} placeholder={r?.configured ? 'stored · enter a new one to replace it' : ''} onChange={(e) => setToken(e.target.value)} autoComplete="new-password" />
+        </label>
+        <div className="set-actions">
+          <Button type="submit" size="sm" variant="primary" icon={Cloud} busy={busy} disabled={!url.trim() || !token.trim()}>
+            {r?.configured ? 'Replace' : 'Save'}
+          </Button>
+          {r?.configured ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={Trash}
+              onClick={async () => {
+                try {
+                  await api.deleteRoutine();
+                  await refresh();
+                  toast('Cloud runs removed');
+                } catch (err) {
+                  toast(describeError(err).detail, 'error');
+                }
+              }}
+            >
+              Remove
+            </Button>
+          ) : null}
+        </div>
+      </form>
+    </section>
+  );
+}
 
 export function Settings() {
   const open = useUi((s) => s.settingsOpen);
@@ -132,19 +219,20 @@ export function Settings() {
                 <>
                   <strong>Configured</strong>
                   <span className="mono muted">{c.model}</span>
-                  <span className="muted">Runs the Director and Review nodes with the photo skill.</span>
+                  <span className="muted">Director and Review can run directly (set “Run via: API” on the node); handoff stays the default.</span>
                 </>
               ) : (
                 <>
                   <strong>Not configured</strong>
                   <span className="muted">
-                    Set <code>ANTHROPIC_API_KEY</code> in the server’s environment and restart it. Until then the Director and Review nodes cannot run; everything else works.
+                    Set <code>ANTHROPIC_API_KEY</code> in the server’s environment and restart it. Until then Director, Review, Blender, Photoshop and Sketch work as handoffs: each builds a task you paste into Claude, and the answer comes back into the node.
                   </span>
                 </>
               )}
             </div>
           </div>
         </section>
+        <RoutineSection />
         <section className="set-section">
           <h3>Appearance</h3>
           <div className="set-row">

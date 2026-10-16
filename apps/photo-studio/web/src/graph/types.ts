@@ -1,7 +1,18 @@
 import type { Edge, Node } from '@xyflow/react';
-import type { Asset, DirectorResponse, ReviewResponse } from '../api/types';
+import type { Asset, DirectorResponse, ReviewResponse, Task } from '../api/types';
 
-export type NodeKind = 'brief' | 'reference' | 'director' | 'generate' | 'edit' | 'review' | 'compare' | 'output';
+export type NodeKind =
+  | 'brief'
+  | 'reference'
+  | 'director'
+  | 'generate'
+  | 'edit'
+  | 'review'
+  | 'compare'
+  | 'output'
+  | 'blender'
+  | 'photoshop'
+  | 'sketch';
 
 export const NODE_KINDS: readonly NodeKind[] = [
   'brief',
@@ -12,6 +23,9 @@ export const NODE_KINDS: readonly NodeKind[] = [
   'review',
   'compare',
   'output',
+  'blender',
+  'photoshop',
+  'sketch',
 ];
 
 export type PortType = 'text' | 'image' | 'spec';
@@ -37,6 +51,16 @@ type Common = {
   exposed?: boolean;
 };
 
+/** A Claude handoff attached to a node (DESIGN.md, "Handoff mode"). */
+export type Handoff = {
+  /** Latest snapshot of the node's task. */
+  handoff?: Task;
+  /** `result.at` of the task result already applied to the node. */
+  handoffApplied?: number;
+};
+
+export type Via = 'handoff' | 'direct';
+
 export type BriefData = Common & { text: string };
 
 export type ReferenceData = Common & {
@@ -48,7 +72,9 @@ export type ReferenceData = Common & {
   error?: NodeError;
 };
 
-export type DirectorData = Common & {
+export type DirectorData = Common &
+  Handoff & {
+  via?: Via;
   task: 'auto' | 'generate' | 'edit';
   model?: string;
   result?: DirectorResponse;
@@ -92,7 +118,9 @@ export type GenData = Common & {
   keep?: string[];
 };
 
-export type ReviewData = Common & {
+export type ReviewData = Common &
+  Handoff & {
+  via?: Via;
   reviews: Record<string, ReviewResponse>;
   order: string[];
   current?: string;
@@ -101,6 +129,62 @@ export type ReviewData = Common & {
 };
 
 export type CompareData = Common & { winner?: string };
+
+export type BlenderData = Common &
+  Handoff & {
+    subject: string;
+    set: string;
+    camera: string;
+    lens: string;
+    light: string;
+    views: string[];
+    notes?: string;
+    results: Asset[];
+    error?: NodeError;
+  };
+
+export type MaskRect = { x: number; y: number; w: number; h: number };
+
+export type PhotoshopData = Common &
+  Handoff & {
+    instruction: string;
+    maskMode: 'paint' | 'rect';
+    /** Painted mask at display resolution (PNG data URL, white = change). */
+    maskUrl?: string;
+    /** Rectangle mask in 0–1 image coordinates. */
+    maskRect?: MaskRect;
+    brush: number;
+    /** Full-resolution mask uploaded with the last task. */
+    maskAsset?: Asset;
+    results: Asset[];
+    error?: NodeError;
+  };
+
+export type Pt = [number, number];
+export type SketchShape =
+  | { t: 'pen'; pts: Pt[]; c: string; w: number }
+  | { t: 'arrow'; a: Pt; b: Pt; c: string; w: number }
+  | { t: 'ellipse'; a: Pt; b: Pt; c: string; w: number }
+  | { t: 'text'; at: Pt; s: string; c: string; w: number };
+export type SketchTool = SketchShape['t'];
+
+export type SketchData = Common &
+  Handoff & {
+    shapes: SketchShape[];
+    redo: SketchShape[];
+    tool: SketchTool;
+    color: string;
+    width: number;
+    /** Flattened image + marks, and the marks alone (saved assets). */
+    flattened?: Asset;
+    overlay?: Asset;
+    /** Hash of the shapes the flattened asset was made from. */
+    savedKey?: string;
+    notes?: string;
+    /** Annotated images returned by Claude. */
+    results: Asset[];
+    error?: NodeError;
+  };
 
 export type OutputData = Common & { current?: string };
 
@@ -113,6 +197,9 @@ export type DataByKind = {
   review: ReviewData;
   compare: CompareData;
   output: OutputData;
+  blender: BlenderData;
+  photoshop: PhotoshopData;
+  sketch: SketchData;
 };
 
 export type AnyData = DataByKind[NodeKind];
@@ -125,7 +212,10 @@ export type AppNode =
   | Node<GenData, 'edit'>
   | Node<ReviewData, 'review'>
   | Node<CompareData, 'compare'>
-  | Node<OutputData, 'output'>;
+  | Node<OutputData, 'output'>
+  | Node<BlenderData, 'blender'>
+  | Node<PhotoshopData, 'photoshop'>
+  | Node<SketchData, 'sketch'>;
 
 export type EdgeData = { type: PortType };
 export type AppEdge = Edge<EdgeData, 'typed'>;
@@ -152,10 +242,16 @@ export function defaultData(kind: NodeKind): AnyData {
       return {};
     case 'output':
       return {};
+    case 'blender':
+      return { subject: '', set: '', camera: '', lens: '', light: '', views: ['three-quarter'], results: [] };
+    case 'photoshop':
+      return { instruction: '', maskMode: 'paint', brush: 24, results: [] };
+    case 'sketch':
+      return { shapes: [], redo: [], tool: 'pen', color: '#e5484d', width: 4, results: [] };
   }
 }
 
-export const RUNNABLE: readonly NodeKind[] = ['director', 'generate', 'edit', 'review'];
+export const RUNNABLE: readonly NodeKind[] = ['director', 'generate', 'edit', 'review', 'blender', 'photoshop'];
 export function isRunnable(kind: string | undefined): boolean {
   return (RUNNABLE as readonly string[]).includes(kind ?? '');
 }

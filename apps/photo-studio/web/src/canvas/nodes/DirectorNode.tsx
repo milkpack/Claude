@@ -9,6 +9,8 @@ import { findModel, useMe, useModels } from '../../api/queries';
 import { Button, Chips, SectionLabel } from '../../components/ui';
 import { ChipList } from '../ChipList';
 import { NodeShell } from './NodeShell';
+import { TaskCard } from '../TaskCard';
+import { ViaChips } from './ViaChips';
 
 const TASKS = ['auto', 'generate', 'edit'] as const;
 
@@ -38,15 +40,15 @@ export function DirectorNode({ id, data, selected }: NodeProps<Extract<AppNode, 
         {briefWired ? `Brief connected · ${refs.length} reference${refs.length === 1 ? '' : 's'}` : 'Connect a Brief, and references if any.'}
         {d.task === 'auto' && hasSource ? ' · edit (a source photo is wired)' : ''}
       </p>
-      {claudeOff ? (
-        <p className="hint warn">Claude is not configured on the server (ANTHROPIC_API_KEY), so the Director cannot run.</p>
-      ) : null}
-
-      {!res ? (
+      <ViaChips id={id} via={d.via} claudeOff={Boolean(claudeOff)} />
+      {claudeOff || d.via !== 'direct' ? (
+        <TaskCard id={id} kind="director" task={d.handoff} applied={d.handoffApplied} createLabel="Create task for Claude" />
+      ) : !res ? (
         <Button variant="primary" size="sm" className="nodrag full" busy={Boolean(rt)} disabled={Boolean(rt) || !briefWired} onClick={() => void runNode(id)}>
           {rt ? 'Directing' : 'Direct the shot'}
         </Button>
-      ) : (
+      ) : null}
+      {!res ? null : (
         <>
           <div className="director-cat">
             <span className="param-label">Category</span>

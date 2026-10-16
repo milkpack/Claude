@@ -21,6 +21,9 @@ export const NODE_WIDTH: Record<NodeKind, number> = {
   review: 320,
   compare: 320,
   output: 300,
+  blender: 320,
+  photoshop: 340,
+  sketch: 360,
 };
 
 export function makeNode<K extends NodeKind>(kind: K, position: XYPosition, data: Record<string, unknown> = {}): AppNode {

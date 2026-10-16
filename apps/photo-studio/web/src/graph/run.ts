@@ -9,6 +9,7 @@ import { toast, useUi } from '../state/ui';
 import { getNode, useGraph } from './store';
 import type { AppNode, GenData, GenRun, NodeError } from './types';
 import { isRunnable } from './types';
+import { createHandoff, usesHandoff } from './handoff';
 import {
   cacheKeyFor,
   editPrompt,
@@ -104,6 +105,13 @@ function waitUntilIdle(id: string): Promise<boolean> {
 async function execute(id: string): Promise<boolean> {
   const node = getNode(id);
   if (!node) return false;
+  if (usesHandoff(node)) {
+    // Handoff: the answer comes back later (polled by the node); this run stops here.
+    const open = (node.data as { handoff?: { status: string } }).handoff?.status === 'open';
+    if (!open) await createHandoff(id);
+    else toast('Waiting for Claude’s answer on this task');
+    return false;
+  }
   const g = useGraph.getState();
   g.updateData(id, { error: undefined }, 'none');
   g.setRuntime(id, { status: 'running', startedAt: Date.now(), phase: 'starting' });

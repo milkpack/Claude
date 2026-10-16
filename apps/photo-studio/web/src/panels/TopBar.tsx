@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Library, Menu, Moon, Plus, Settings, Sun, Trash } from 'lucide-react';
+import { ChevronDown, CopyPlus, Image as ImageIcon, Library, Menu, Moon, Pencil, Plus, Settings, Sun, Trash } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../api/client';
+import type { WorkflowSummary } from '../api/types';
 import { useMe, useWorkflows } from '../api/queries';
 import { useGraph } from '../graph/store';
-import { deleteWorkflow, newWorkflow, openWorkflow } from '../graph/sync';
+import { deleteWorkflow, duplicateSession, newWorkflow, openWorkflow, renameSession } from '../graph/sync';
 import { useUi } from '../state/ui';
 import { formatCredits, formatDate } from '../lib/util';
-import { IconButton, connectOpenArt } from '../components/ui';
+import { Button, IconButton, connectOpenArt } from '../components/ui';
 
 function SaveState() {
   const s = useUi((x) => x.saveState);
@@ -18,7 +21,87 @@ function SaveState() {
   );
 }
 
-function WorkflowSwitcher() {
+function Cover({ id }: { id?: string }) {
+  const q = useQuery({ queryKey: ['asset', id ?? ''], queryFn: () => api.asset(id ?? ''), enabled: Boolean(id), staleTime: Infinity, retry: false });
+  return <span className="session-cover">{q.data ? <img src={q.data.thumb} alt="" draggable={false} /> : <ImageIcon size={14} aria-hidden />}</span>;
+}
+
+function SessionRow({ w, current, close }: { w: WorkflowSummary; current: boolean; close: () => void }) {
+  const [mode, setMode] = useState<'view' | 'rename' | 'confirm'>('view');
+  const [name, setName] = useState(w.name);
+  if (mode === 'confirm')
+    return (
+      <div className="session-row is-confirm" role="alertdialog" aria-label={`Delete ${w.name}?`}>
+        <span className="session-confirm">
+          Delete <strong>{w.name}</strong>? Its canvas goes; its images stay in the library.
+        </span>
+        <div className="session-confirm-actions">
+          <Button size="sm" variant="danger" autoFocus onClick={() => void deleteWorkflow(w.id)}>
+            Delete
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setMode('view')}>
+            Keep
+          </Button>
+        </div>
+      </div>
+    );
+  return (
+    <div className={`session-row ${current ? 'is-on' : ''}`}>
+      <Cover id={w.cover} />
+      {mode === 'rename' ? (
+        <input
+          className="input session-rename"
+          value={name}
+          autoFocus
+          aria-label="Session name"
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => {
+            void renameSession(w.id, name);
+            setMode('view');
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+            if (e.key === 'Escape') {
+              setName(w.name);
+              setMode('view');
+            }
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          role="menuitem"
+          className="session-open"
+          onClick={() => {
+            close();
+            if (!current) void openWorkflow(w.id);
+          }}
+        >
+          <span className="session-name">{w.name}</span>
+          <span className="session-date mono">
+            {current ? 'open · ' : ''}
+            {formatDate(w.lastOpenedAt ?? w.updatedAt)}
+          </span>
+        </button>
+      )}
+      <span className="session-actions">
+        <IconButton icon={Pencil} label={`Rename ${w.name}`} size={13} onClick={() => setMode('rename')} />
+        <IconButton
+          icon={CopyPlus}
+          label={`Duplicate ${w.name}`}
+          size={13}
+          onClick={() => {
+            close();
+            void duplicateSession(w.id);
+          }}
+        />
+        <IconButton icon={Trash} label={`Delete ${w.name}`} size={13} onClick={() => setMode('confirm')} />
+      </span>
+    </div>
+  );
+}
+
+function SessionSwitcher() {
   const name = useGraph((s) => s.name);
   const current = useGraph((s) => s.workflowId);
   const [open, setOpen] = useState(false);
@@ -37,61 +120,41 @@ function WorkflowSwitcher() {
       window.removeEventListener('keydown', key);
     };
   }, [open]);
+  const sessions = [...(list.data?.workflows ?? [])].sort((a, b) => (b.lastOpenedAt ?? b.updatedAt) - (a.lastOpenedAt ?? a.updatedAt));
   return (
     <div className="wf-switch" ref={ref}>
       <input
         className="wf-name"
         value={name}
-        aria-label="Workflow name"
+        aria-label="Session name"
         spellCheck={false}
         onChange={(e) => useGraph.getState().setName(e.target.value)}
         onBlur={(e) => {
-          if (!e.target.value.trim()) useGraph.getState().setName('Untitled workflow');
+          if (!e.target.value.trim()) useGraph.getState().setName('Untitled session');
         }}
         onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
       />
-      <IconButton icon={ChevronDown} label="Switch workflow" size={14} aria-expanded={open} onClick={() => setOpen((v) => !v)} />
+      <IconButton icon={ChevronDown} label="Sessions" size={14} aria-expanded={open} onClick={() => setOpen((v) => !v)} />
       {open ? (
-        <div className="wf-pop" role="menu">
-          <button
-            type="button"
-            className="menu-item"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              void newWorkflow();
-            }}
-          >
-            <Plus size={14} aria-hidden /> <span className="menu-label">New workflow</span>
-          </button>
-          <div className="menu-sep" />
-          <div className="menu-label-row">Workflows</div>
+        <div className="wf-pop session-pop" role="menu" aria-label="Sessions">
+          <div className="session-pop-head">
+            <span className="menu-label-row">Sessions</span>
+            <Button
+              size="sm"
+              icon={Plus}
+              onClick={() => {
+                setOpen(false);
+                void newWorkflow();
+              }}
+            >
+              New session
+            </Button>
+          </div>
           {list.isLoading ? <div className="menu-empty">Loading…</div> : null}
-          {list.data?.workflows.length === 0 ? <div className="menu-empty">None saved yet.</div> : null}
+          {list.data && sessions.length === 0 ? <div className="menu-empty">No saved sessions yet. Anything you build is saved as one.</div> : null}
           <div className="wf-list">
-            {list.data?.workflows.map((w) => (
-              <div key={w.id} className={`wf-row ${w.id === current ? 'is-on' : ''}`}>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="menu-item"
-                  onClick={() => {
-                    setOpen(false);
-                    if (w.id !== current) void openWorkflow(w.id);
-                  }}
-                >
-                  <span className="menu-label">{w.name}</span>
-                  <span className="menu-keys mono">{formatDate(w.updatedAt)}</span>
-                </button>
-                <IconButton
-                  icon={Trash}
-                  label={`Delete ${w.name}`}
-                  size={13}
-                  onClick={() => {
-                    if (window.confirm(`Delete “${w.name}”? This cannot be undone.`)) void deleteWorkflow(w.id);
-                  }}
-                />
-              </div>
+            {sessions.map((w) => (
+              <SessionRow key={w.id} w={w} current={w.id === current} close={() => setOpen(false)} />
             ))}
           </div>
         </div>
@@ -153,7 +216,7 @@ export function TopBar() {
           <span className="brand-name hide-narrow">Photo Studio</span>
         </span>
         <span className="topbar-sep hide-narrow" aria-hidden />
-        <WorkflowSwitcher />
+        <SessionSwitcher />
         <span className="hide-narrow">
           <SaveState />
         </span>

@@ -13,6 +13,11 @@ import type {
   ModelsResponse,
   ReviewRequest,
   ReviewResponse,
+  RoutineSettings,
+  SessionMeta,
+  Task,
+  TaskRequest,
+  TaskStatus,
   Workflow,
   WorkflowGraph,
   WorkflowSummary,
@@ -150,11 +155,31 @@ export const api = {
 
   workflows: () => request<{ workflows: WorkflowSummary[] }>('/api/workflows'),
   workflow: (id: string) => request<Workflow>(`/api/workflows/${enc(id)}`),
-  createWorkflow: (name: string, graph: WorkflowGraph) =>
-    request<Workflow>('/api/workflows', { method: 'POST', body: { name, graph } }),
-  saveWorkflow: (id: string, name: string, graph: WorkflowGraph) =>
-    request<Workflow>(`/api/workflows/${enc(id)}`, { method: 'PUT', body: { name, graph } }),
+  createWorkflow: (name: string, graph: WorkflowGraph, meta: SessionMeta = {}) =>
+    request<Workflow>('/api/workflows', { method: 'POST', body: { name, graph, kind: 'session', ...meta } }),
+  saveWorkflow: (id: string, name: string, graph: WorkflowGraph, meta: SessionMeta = {}) =>
+    request<Workflow>(`/api/workflows/${enc(id)}`, { method: 'PUT', body: { name, graph, kind: 'session', ...meta } }),
   deleteWorkflow: (id: string) => request<object>(`/api/workflows/${enc(id)}`, { method: 'DELETE' }),
+
+  createTask: (req: TaskRequest) => request<Task>('/api/tasks', { method: 'POST', body: req }),
+  tasks: (sessionId: string, status?: TaskStatus) => request<{ tasks: Task[] }>(`/api/tasks${qs({ sessionId, status })}`),
+  task: (id: string, signal?: AbortSignal) => request<Task>(`/api/tasks/${enc(id)}`, { signal }),
+  taskResultJson: (id: string, body: { text?: string; json?: unknown }) =>
+    request<Task>(`/api/tasks/${enc(id)}/result`, { method: 'POST', body }),
+  taskResultFiles: (id: string, files: File[], text?: string) => {
+    const form = new FormData();
+    for (const f of files.slice(0, 20)) form.append('files', f);
+    if (text) form.append('text', text);
+    return request<Task>(`/api/tasks/${enc(id)}/result`, { method: 'POST', form });
+  },
+  taskFileUrl: (id: string, name: string) => `/api/tasks/${enc(id)}/files/${enc(name)}`,
+  duplicateWorkflow: (id: string, name?: string) =>
+    request<Workflow>(`/api/workflows/${enc(id)}/duplicate`, { method: 'POST', body: name ? { name } : {} }),
+  fireTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}/fire`, { method: 'POST' }),
+  routine: () => request<RoutineSettings>('/api/settings/routine'),
+  saveRoutine: (url: string, token: string) => request<RoutineSettings>('/api/settings/routine', { method: 'POST', body: { url, token } }),
+  deleteRoutine: () => request<object>('/api/settings/routine', { method: 'DELETE' }),
+  cancelTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}/cancel`, { method: 'POST' }),
 };
 
 /**

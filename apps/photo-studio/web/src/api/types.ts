@@ -12,6 +12,8 @@ export type Me = {
   authenticated: boolean;
   openart: OpenArtStatus;
   claude: { configured: boolean; model: string };
+  /** A Claude Code cloud routine that can answer tasks by itself. */
+  routine?: { configured: boolean };
 };
 
 export type ModelMode = { mode: string; description: string; credits: number; affordable: boolean };
@@ -161,9 +163,9 @@ export type ReviewResponse = {
 
 export type WorkflowGraph = { nodes: unknown[]; edges: unknown[]; viewport?: unknown };
 
-export type Workflow = { id: string; name: string; graph: WorkflowGraph; updatedAt: number };
+export type Workflow = { id: string; name: string; graph: WorkflowGraph; updatedAt: number } & SessionMeta;
 
-export type WorkflowSummary = { id: string; name: string; updatedAt: number };
+export type WorkflowSummary = { id: string; name: string; updatedAt: number } & SessionMeta;
 
 export type ApiErrorCode =
   | 'unauthenticated'
@@ -176,3 +178,58 @@ export type ApiErrorCode =
   | 'rate_limited';
 
 export type ApiErrorBody = { error: string; code?: string };
+
+/* ---------- handoff mode (DESIGN.md, "Handoff mode (no Anthropic API)") ---------- */
+
+export type TaskInput = { assetId: string; role?: string };
+
+export type TaskKind = 'director' | 'review' | 'blender' | 'photoshop' | 'sketch' | 'custom';
+
+export type TaskStatus = 'open' | 'done' | 'cancelled';
+
+export type Task = {
+  id: string;
+  sessionId: string;
+  nodeId: string;
+  kind: TaskKind;
+  status: TaskStatus;
+  title: string;
+  prompt: string;
+  inputs: string[];
+  /** One role per input (source, mask, reference…). */
+  roles?: string[];
+  links: { assetId: string; url: string }[];
+  returnUrl: string;
+  expiresAt?: number;
+  /** Cloud run of the task (Claude Code routine), when fired. */
+  run?: { state: 'fired' | 'failed'; sessionUrl?: string; error?: string; at: number };
+  result?: {
+    text?: string;
+    assets: Asset[];
+    json?: unknown;
+    /** Non-image attachments (.blend, .psd), served at /api/tasks/:id/files/:name. */
+    files?: { name: string; size?: number; contentType?: string }[];
+    /** Why the returned JSON did not validate, if it didn't. */
+    error?: string;
+    at: number;
+  };
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type TaskRequest = {
+  sessionId: string;
+  nodeId: string;
+  kind: TaskKind;
+  title?: string;
+  instructions?: string;
+  inputs: (string | TaskInput)[];
+  context?: Record<string, unknown>;
+  /** Fire the cloud routine right away (director, review, sketch, custom). */
+  auto?: boolean;
+};
+
+export type RoutineSettings = { configured: boolean; url?: string; source?: string };
+
+/** Session metadata carried on workflows (`kind: "session"`). */
+export type SessionMeta = { kind?: 'session'; createdAt?: number; lastOpenedAt?: number; cover?: string };

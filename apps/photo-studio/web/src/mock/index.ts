@@ -3,8 +3,9 @@
 //   loggedout  start signed out          noopenart  OpenArt not connected
 //   reconnect  OpenArt needs reconnect   noclaude   no ANTHROPIC_API_KEY
 //   broke      a low credit balance      empty      no seeded library
-//   fast / slow  job speed
-import type { Asset, Job, Me, Workflow } from '../api/types';
+//   fast / slow  job speed           manual  tasks never answer by themselves
+//   routine  a Claude routine is configured (cloud runs)
+import type { Asset, Job, Me, Task, TaskKind, Workflow } from '../api/types';
 import { direct, review } from './brain';
 import { MOCK_MODELS, modesOf, outputSize, priceOf, schemaFor } from './models';
 import type { Grade, Style } from './paint';
@@ -23,10 +24,12 @@ const state = {
   failedLogins: [] as number[],
   openart: { connected: !flags.has('noopenart'), needsReconnect: flags.has('reconnect'), email: 'studio@example.com', plan: 'Infinite' },
   claude: !flags.has('noclaude'),
+  routine: flags.has('routine') ? { url: 'https://api.anthropic.com/v1/claude_code/routines/trig_mock/fire', token: 'x' } : (null as { url: string; token: string } | null),
   balance: flags.has('broke') ? 120 : 12_480,
   assets: [] as Asset[],
   jobs: new Map<string, Job>(),
   workflows: new Map<string, Workflow>(),
+  tasks: new Map<string, Task>(),
   seq: 1,
 };
 
@@ -47,6 +50,7 @@ function me(): Me {
         }
       : { connected: false, needsReconnect: false },
     claude: { configured: state.claude, model: 'claude-opus-5-5' },
+    routine: { configured: Boolean(state.routine) },
   };
 }
 
@@ -160,6 +164,127 @@ async function finishJob(job: Job, n: number): Promise<void> {
     job.error = `mock: ${e instanceof Error ? e.message : String(e)}`;
   }
   job.updatedAt = Date.now();
+}
+
+/* ---------- tasks (handoff mode) ---------- */
+
+const KIND_TEXT: Record<TaskKind, string> = {
+  director: 'Direct the shot with the photo skill. Return ONLY a fenced ```json block matching DirectorResponse (category, spec, plan, prompt, params, references, preserve, questions).',
+  review: 'Review each input image against the brief (and the source for edits). Return ONLY a fenced ```json block: an array of ReviewResponse objects in input order.',
+  blender: 'Build the described scene in Blender, render the requested views as PNG and upload them to the return link with a one-paragraph note.',
+  photoshop: 'Open input 1 in Photoshop. Using input 2 as the selection (white = change), make only the described change; keep everything else pixel-identical. Upload the PNG to the return link.',
+  sketch: 'Mark the issues on input 1: arrows, circles and numbered notes. Upload the annotated PNG and the numbered list of issues.',
+  custom: 'Follow the instructions.',
+};
+
+function taskPrompt(t: Task, context: unknown, instructions?: string): string {
+  const lines = [
+    `# ${t.title}`,
+    '',
+    `Photo Studio task \`${t.id}\` (${t.kind}).`,
+    '',
+    '## Instructions',
+    KIND_TEXT[t.kind],
+    ...(instructions ? ['', instructions] : []),
+    '',
+    '## Context',
+    '```json',
+    JSON.stringify(context ?? {}, null, 2),
+    '```',
+    '',
+    '## Inputs',
+    ...t.links.map((l, i) => `${i + 1}. ${l.url}`),
+    '',
+    '## Download the inputs',
+    ...t.links.map((l, i) => `curl -sSLo input${i + 1}.png '${l.url}'`),
+    '',
+    '## Return the result',
+    `curl -sS -F files=@out.png -F text='notes' '${t.returnUrl}'`,
+  ];
+  return lines.join('\n');
+}
+
+async function answerTask(t: Task, context: Record<string, unknown>): Promise<void> {
+  const inputs = t.inputs.map((id) => state.assets.find((a) => a.id === id)).filter((a): a is Asset => Boolean(a));
+  const result: NonNullable<Task['result']> = { assets: [], at: Date.now() };
+  if (t.kind === 'director') {
+    const res = direct({
+      brief: String(context.brief ?? ''),
+      references: Array.isArray(context.references) ? (context.references as { assetId: string; role?: string }[]) : [],
+      task: context.task === 'edit' || context.task === 'generate' ? context.task : undefined,
+    });
+    result.text = 'Here is the direction.\n\n```json\n' + JSON.stringify(res, null, 2) + '\n```';
+  } else if (t.kind === 'review') {
+    const ids = Array.isArray(context.assetIds) ? (context.assetIds as string[]) : t.inputs;
+    const reviews = ids.map((id) => ({ assetId: id, ...review({ assetId: id, sourceAssetId: typeof context.sourceAssetId === 'string' ? context.sourceAssetId : undefined }) }));
+    result.json = reviews;
+    result.text = '```json\n' + JSON.stringify(reviews, null, 2) + '\n```';
+  } else {
+    const views = t.kind === 'blender' ? Math.max(1, Math.min(5, Array.isArray(context.views) ? context.views.length : 1)) : 1;
+    const src = inputs[0];
+    for (let i = 0; i < views; i++) {
+      let canvas: HTMLCanvasElement;
+      const seedN = seedOf(t.id) + i * 31;
+      if (t.kind === 'blender') {
+        const words = `${String(context.subject ?? '')} ${String(context.set ?? '')} ${String(context.light ?? '')}`;
+        const style = styleFromWords(words);
+        canvas = paint({ seed: seedN, width: 1400, height: 1050, style: style === 'portrait' ? 'interior' : style, grade: gradeFromWords(words) });
+      } else if (src) {
+        const img = await loadImage(src.file);
+        const k = 1400 / Math.max(img.naturalWidth, img.naturalHeight, 1);
+        canvas = regrade(img, { seed: seedN, width: img.naturalWidth * k, height: img.naturalHeight * k, grade: t.kind === 'sketch' ? GRADES.daylight! : GRADES.warm!, strength: t.kind === 'sketch' ? 0.05 : 0.25 });
+        if (t.kind === 'sketch') {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.strokeStyle = '#e5484d';
+            ctx.fillStyle = '#e5484d';
+            ctx.lineWidth = canvas.width * 0.006;
+            ctx.font = `600 ${Math.round(canvas.width * 0.04)}px "IBM Plex Sans", sans-serif`;
+            const marks: [number, number, number][] = [
+              [0.42, 0.3, 0.08],
+              [0.62, 0.62, 0.1],
+            ];
+            marks.forEach(([x, y, r], n) => {
+              ctx.beginPath();
+              ctx.ellipse(x * canvas.width, y * canvas.height, r * canvas.width, r * canvas.width * 0.8, 0, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.fillText(String(n + 1), (x + r) * canvas.width + 6, (y - r * 0.6) * canvas.height);
+            });
+          }
+        }
+      } else continue;
+      result.assets.push(await makeAsset(canvas, { kind: 'upload', width: canvas.width, height: canvas.height, prompt: t.title }));
+    }
+    state.assets = [...result.assets, ...state.assets];
+    result.text =
+      t.kind === 'blender'
+        ? 'Built the set in Blender (Cycles, 512 samples). Camera and light as briefed; renders attached.'
+        : t.kind === 'photoshop'
+          ? 'Selected from the mask, healed and cloned at 100 %, matched grain. Everything outside the mask is untouched.'
+          : '1 — stray hair crossing the left eye.\n2 — fold in the collar catches a hot highlight.';
+  }
+  if (t.kind === 'blender') result.files = [{ name: 'scene.blend', size: 18_400_000, contentType: 'application/octet-stream' }];
+  result.at = Date.now();
+  t.result = result;
+  t.status = 'done';
+  t.updatedAt = result.at;
+}
+
+async function taskFilesResult(t: Task, fd: FormData): Promise<void> {
+  const assets: Asset[] = [];
+  for (const f of fd.getAll('files').slice(0, 20)) {
+    if (!(f instanceof File) || !f.type.startsWith('image/')) continue;
+    const url = URL.createObjectURL(f);
+    const img = await loadImage(url);
+    const thumb = await toBlobUrl(scaled(img, 420), 'image/jpeg', 0.82);
+    assets.push({ id: id('ast'), kind: 'upload', file: url, thumb, width: img.naturalWidth, height: img.naturalHeight, createdAt: Date.now() });
+  }
+  state.assets = [...assets, ...state.assets];
+  const text = fd.get('text');
+  const at = Date.now();
+  t.result = { assets, text: typeof text === 'string' ? text : undefined, at };
+  t.status = 'done';
+  t.updatedAt = at;
 }
 
 /* ---------- router ---------- */
@@ -329,13 +454,116 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
     return json(200, review(b as unknown as Parameters<typeof review>[0]));
   }
 
+  if (path === '/api/settings/routine') {
+    if (method === 'POST') {
+      const b = await body(init);
+      if (typeof b.url !== 'string' || !/^https:\/\//.test(b.url) || typeof b.token !== 'string' || !b.token) return err(400, 'An https URL and a token are required.', 'bad_request');
+      state.routine = { url: b.url, token: b.token };
+    } else if (method === 'DELETE') state.routine = null;
+    return json(200, { configured: Boolean(state.routine), ...(state.routine ? { url: state.routine.url, source: 'settings' } : {}) });
+  }
+  if (path === '/api/tasks' && method === 'POST') {
+    const b = await body(init);
+    const kinds: TaskKind[] = ['director', 'review', 'blender', 'photoshop', 'sketch', 'custom'];
+    const kind = kinds.find((k) => k === b.kind);
+    if (!kind || typeof b.sessionId !== 'string' || typeof b.nodeId !== 'string') return err(400, 'sessionId, nodeId and kind are required.', 'bad_request');
+    const raw = Array.isArray(b.inputs) ? (b.inputs as unknown[]).slice(0, 20) : [];
+    const parsed = raw.flatMap((x) =>
+      typeof x === 'string' ? [{ assetId: x, role: 'input' }] : x && typeof x === 'object' && typeof (x as { assetId?: unknown }).assetId === 'string' ? [{ assetId: (x as { assetId: string }).assetId, role: String((x as { role?: unknown }).role ?? 'input') }] : [],
+    );
+    const inputs = parsed.map((p) => p.assetId);
+    const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const now = Date.now();
+    const t: Task = {
+      id: id('task'),
+      sessionId: b.sessionId,
+      nodeId: b.nodeId,
+      kind,
+      status: 'open',
+      title: typeof b.title === 'string' && b.title ? b.title : `${kind} task`,
+      prompt: '',
+      inputs,
+      roles: parsed.map((p) => p.role),
+      expiresAt: now + 7 * 86_400_000,
+      links: inputs.map((a) => ({ assetId: a, url: `${window.location.origin}/t/${token}/inputs/${a}` })),
+      returnUrl: `${window.location.origin}/t/${token}`,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const context = (b.context as Record<string, unknown>) ?? {};
+    t.prompt = taskPrompt(t, context, typeof b.instructions === 'string' ? b.instructions : undefined);
+    const autoKinds: TaskKind[] = ['director', 'review', 'sketch', 'custom'];
+    if (b.auto === true && autoKinds.includes(kind)) {
+      t.run = state.routine
+        ? { state: 'fired', sessionUrl: `https://claude.ai/code/session_mock${t.id}`, at: now }
+        : { state: 'failed', error: 'No routine is configured.', at: now };
+    }
+    state.tasks.set(t.id, t);
+    if (!flags.has('manual')) window.setTimeout(() => {
+      if (t.status === 'open') void answerTask(t, context);
+    }, 7000 * speed);
+    return json(200, structuredClone(t));
+  }
+  if (path === '/api/tasks' && method === 'GET') {
+    const sid = url.searchParams.get('sessionId');
+    const st = url.searchParams.get('status');
+    const tasks = [...state.tasks.values()].filter((t) => (!sid || t.sessionId === sid) && (!st || t.status === st)).sort((a, b) => b.createdAt - a.createdAt);
+    return json(200, { tasks });
+  }
+  const task = /^\/api\/tasks\/([^/]+)(\/result|\/cancel|\/fire)?$/.exec(path);
+  if (task) {
+    const t = state.tasks.get(decodeURIComponent(task[1] ?? ''));
+    if (!t) return err(404, 'Task not found.', 'not_found');
+    if (task[2] === '/fire' && method === 'POST') {
+      const now = Date.now();
+      t.run = state.routine ? { state: 'fired', sessionUrl: `https://claude.ai/code/session_mock${t.id}${now % 1000}`, at: now } : { state: 'failed', error: 'No routine is configured.', at: now };
+      t.updatedAt = now;
+    } else if (task[2] === '/cancel' && method === 'POST') {
+      t.status = 'cancelled';
+      t.updatedAt = Date.now();
+    } else if (task[2] === '/result' && method === 'POST') {
+      if (t.status === 'cancelled') return err(400, 'The task was cancelled.', 'bad_request');
+      if (init?.body instanceof FormData) await taskFilesResult(t, init.body);
+      else {
+        const b = await body(init);
+        const at = Date.now();
+        t.result = { text: typeof b.text === 'string' ? b.text : undefined, json: b.json, assets: [], at };
+        t.status = 'done';
+        t.updatedAt = at;
+      }
+    }
+    return json(200, structuredClone(t));
+  }
+
   if (path === '/api/workflows' && method === 'GET') {
-    const workflows = [...state.workflows.values()].map(({ id: wid, name, updatedAt }) => ({ id: wid, name, updatedAt })).sort((a, b) => b.updatedAt - a.updatedAt);
+    const workflows = [...state.workflows.values()]
+      .map(({ id: wid, name, updatedAt, kind, createdAt, lastOpenedAt, cover }) => ({ id: wid, name, updatedAt, kind, createdAt, lastOpenedAt, cover }))
+      .sort((a, b) => (b.lastOpenedAt ?? b.updatedAt) - (a.lastOpenedAt ?? a.updatedAt));
     return json(200, { workflows });
   }
   if (path === '/api/workflows' && method === 'POST') {
     const b = await body(init);
-    const w: Workflow = { id: id('wf'), name: String(b.name ?? 'Untitled workflow'), graph: (b.graph as Workflow['graph']) ?? { nodes: [], edges: [] }, updatedAt: Date.now() };
+    const now = Date.now();
+    const w: Workflow = {
+      id: id('wf'),
+      name: String(b.name ?? 'Untitled session'),
+      graph: (b.graph as Workflow['graph']) ?? { nodes: [], edges: [] },
+      updatedAt: now,
+      kind: 'session',
+      createdAt: typeof b.createdAt === 'number' ? b.createdAt : now,
+      lastOpenedAt: typeof b.lastOpenedAt === 'number' ? b.lastOpenedAt : now,
+      cover: typeof b.cover === 'string' ? b.cover : undefined,
+    };
+    state.workflows.set(w.id, w);
+    return json(200, w);
+  }
+  const dup = /^\/api\/workflows\/([^/]+)\/duplicate$/.exec(path);
+  if (dup && method === 'POST') {
+    const src = state.workflows.get(decodeURIComponent(dup[1] ?? ''));
+    if (!src) return err(404, 'Workflow not found.', 'not_found');
+    const b = await body(init);
+    const now = Date.now();
+    const w: Workflow = { ...structuredClone(src), id: id('wf'), name: typeof b.name === 'string' && b.name ? b.name : `${src.name} copy`, createdAt: now, lastOpenedAt: now, updatedAt: now };
     state.workflows.set(w.id, w);
     return json(200, w);
   }
@@ -350,10 +578,18 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
     }
     if (method === 'PUT') {
       const b = await body(init);
-      const next: Workflow = { ...w, name: typeof b.name === 'string' ? b.name : w.name, graph: (b.graph as Workflow['graph']) ?? w.graph, updatedAt: Date.now() };
+      const next: Workflow = {
+        ...w,
+        name: typeof b.name === 'string' ? b.name : w.name,
+        graph: (b.graph as Workflow['graph']) ?? w.graph,
+        updatedAt: Date.now(),
+        cover: typeof b.cover === 'string' ? b.cover : w.cover,
+        lastOpenedAt: typeof b.lastOpenedAt === 'number' ? b.lastOpenedAt : w.lastOpenedAt,
+      };
       state.workflows.set(wid, next);
       return json(200, next);
     }
+    w.lastOpenedAt = Date.now();
     return json(200, structuredClone(w));
   }
   return err(404, `No mock route for ${method} ${path}`, 'not_found');

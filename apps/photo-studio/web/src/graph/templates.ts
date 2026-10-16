@@ -194,4 +194,33 @@ export const TEMPLATES: Template[] = [
       };
     },
   },
+  {
+    id: 'fix-photoshop',
+    name: 'Fix with Photoshop',
+    description: 'Source → Sketch marks → Photoshop task (masked, change only) → Review.',
+    tag: 'handoff',
+    build: () => {
+      const source = makeNode('reference', { x: 0, y: 0 }, { title: 'Photo to fix', role: 'edit-source', exposed: true });
+      const sketch = makeNode('sketch', { x: COL - 60, y: 0 }, { title: 'Mark the problems', exposed: true });
+      const ps = makeNode('photoshop', { x: COL * 2 + 10, y: 0 }, {
+        title: 'Retouch',
+        exposed: true,
+        instruction: 'Change only the areas marked in image 2. Keep everything else pixel-identical.',
+      });
+      const review = makeNode('review', { x: COL * 3 + 10, y: 0 }, {});
+      const output = makeNode('output', { x: COL * 3 + 10, y: 520 }, {});
+      return {
+        nodes: [source, sketch, ps, review, output],
+        edges: [
+          makeEdge(source.id, 'image', sketch.id, 'image', 'image'),
+          makeEdge(source.id, 'image', ps.id, 'source', 'image'),
+          makeEdge(sketch.id, 'image', ps.id, 'refs', 'image'),
+          makeEdge(sketch.id, 'notes', ps.id, 'prompt', 'text'),
+          makeEdge(ps.id, 'images', review.id, 'image', 'image'),
+          makeEdge(source.id, 'image', review.id, 'source', 'image'),
+          makeEdge(ps.id, 'images', output.id, 'image', 'image'),
+        ],
+      };
+    },
+  },
 ];
