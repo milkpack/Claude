@@ -84,7 +84,21 @@ pub struct App {
     pub static_dir: Option<PathBuf>,
     /// Set to `true` when the server stops; background pollers exit on it.
     pub stop: tokio::sync::watch::Sender<bool>,
+    pub tasks: crate::tasks::Tasks,
+    /// External base URL, without a trailing slash (absolute links in task prompts).
+    pub public_url: String,
+    /// The photo skill as one text block (appended to some task prompts).
+    pub skill_text: String,
+    /// Requests to the public `/t/*` routes, per client.
+    pub token_limit: auth::WindowLimiter,
+    /// Unknown or wrong tokens, per client.
+    pub bad_token_limit: auth::WindowLimiter,
 }
+
+/// Public `/t/*` requests allowed per client per minute.
+pub const TOKEN_REQUESTS_PER_MINUTE: usize = 120;
+/// Wrong tokens allowed per client per minute (then 429 for every `/t/*` request).
+pub const BAD_TOKENS_PER_MINUTE: usize = 10;
 
 /// Create the data directories and the application state.
 pub fn build(opts: Options) -> Result<Arc<App>, String> {
@@ -130,6 +144,11 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
         allow_private_urls: opts.allow_private_urls,
         static_dir: opts.static_dir,
         stop: tokio::sync::watch::channel(false).0,
+        tasks: crate::tasks::Tasks::load(opts.data_dir.join("tasks"))?,
+        skill_text: opts.skill.prompt_text(),
+        public_url: public,
+        token_limit: auth::WindowLimiter::new(TOKEN_REQUESTS_PER_MINUTE, 60_000),
+        bad_token_limit: auth::WindowLimiter::new(BAD_TOKENS_PER_MINUTE, 60_000),
     }))
 }
 
@@ -150,6 +169,12 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/review", post(review_handler))
         .route("/api/workflows", get(list_workflows).post(create_workflow))
         .route("/api/workflows/{id}", get(get_workflow).put(put_workflow).delete(delete_workflow))
+        .route("/api/workflows/{id}/duplicate", post(duplicate_workflow))
+        .route("/api/tasks", get(crate::handoff::list_tasks).post(crate::handoff::create_task))
+        .route("/api/tasks/{id}", get(crate::handoff::get_task))
+        .route("/api/tasks/{id}/result", post(crate::handoff::task_result).layer(DefaultBodyLimit::max(crate::tasks::RESULT_BODY_LIMIT)))
+        .route("/api/tasks/{id}/cancel", post(crate::handoff::cancel_task))
+        .route("/api/tasks/{id}/files/{name}", get(crate::handoff::task_file))
         .route_layer(from_fn_with_state(app.clone(), auth::require_session));
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
@@ -158,6 +183,13 @@ pub fn router(app: Arc<App>) -> Router {
         // Public so a stale cookie can always be cleared; signing out everywhere needs a session.
         .route("/api/logout", post(logout))
         .route("/oauth/openart/callback", get(oauth_callback))
+        // Token-authorised (never by the session cookie).
+        .route(
+            "/t/{token}",
+            get(crate::handoff::token_page).post(crate::handoff::token_result).layer(DefaultBodyLimit::max(crate::tasks::RESULT_BODY_LIMIT)),
+        )
+        .route("/t/{token}/result", post(crate::handoff::token_result).layer(DefaultBodyLimit::max(crate::tasks::RESULT_BODY_LIMIT)))
+        .route("/t/{token}/inputs/{asset_id}", get(crate::handoff::token_input))
         .merge(protected)
         .fallback(fallback)
         .layer(from_fn(auth::csrf_guard))
@@ -194,7 +226,7 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for JsonBody<T> {
     }
 }
 
-fn check_id(id: &str, what: &str) -> ApiResult<()> {
+pub fn check_id(id: &str, what: &str) -> ApiResult<()> {
     if store::valid_id(id) { Ok(()) } else { Err(ApiError::not_found(format!("no such {what}"))) }
 }
 
@@ -471,7 +503,7 @@ async fn delete_asset(State(app): State<Arc<App>>, Path(id): Path<String>) -> Ap
     if app.assets.delete(&id).await { Ok(Json(json!({}))) } else { Err(ApiError::not_found("no such asset")) }
 }
 
-fn image_response(bytes: Vec<u8>, mime: &'static str) -> Response {
+pub fn image_response(bytes: Vec<u8>, mime: &'static str) -> Response {
     let mut resp = Response::new(Body::from(bytes));
     let h = resp.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
@@ -540,7 +572,18 @@ async fn create_workflow(State(app): State<Arc<App>>, JsonBody(body): JsonBody<W
 
 async fn get_workflow(State(app): State<Arc<App>>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     check_id(&id, "workflow")?;
-    Ok(Json(json!(app.workflows.get(&id).await?)))
+    Ok(Json(json!(app.workflows.open(&id).await?)))
+}
+
+#[derive(Deserialize)]
+struct DuplicateBody {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+async fn duplicate_workflow(State(app): State<Arc<App>>, Path(id): Path<String>, JsonBody(body): JsonBody<DuplicateBody>) -> ApiResult<Json<Value>> {
+    check_id(&id, "workflow")?;
+    Ok(Json(json!(app.workflows.duplicate(&id, body.name).await?)))
 }
 
 async fn put_workflow(State(app): State<Arc<App>>, Path(id): Path<String>, JsonBody(body): JsonBody<WorkflowInput>) -> ApiResult<Json<Value>> {

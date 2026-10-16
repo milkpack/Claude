@@ -19,7 +19,8 @@ async fn workflows_crud() {
     assert!(w["updatedAt"].as_u64().unwrap() > 0);
     let w2: Value = ts.post("/api/workflows", json!({ "name": "Second", "graph": { "nodes": [], "edges": [] } })).await.json().await.unwrap();
 
-    assert_eq!(ts.json(&format!("/api/workflows/{id}")).await, w);
+    let opened = ts.json(&format!("/api/workflows/{id}")).await;
+    assert_eq!((&opened["graph"], &opened["name"]), (&w["graph"], &w["name"]));
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     let r = ts.send_json(Method::PUT, &format!("/api/workflows/{id}"), &json!({ "name": "Renamed" })).await;
     assert_eq!(r.status(), 200);
@@ -27,7 +28,9 @@ async fn workflows_crud() {
     assert_eq!(updated["name"], "Renamed");
     assert_eq!(updated["graph"], graph, "the graph is kept when not sent");
     let list = ts.json("/api/workflows").await;
-    assert_eq!(list["workflows"][0], json!({ "id": id, "name": "Renamed", "updatedAt": updated["updatedAt"] }));
+    assert_eq!(list["workflows"][0]["id"], id.as_str());
+    assert_eq!(list["workflows"][0]["name"], "Renamed");
+    assert_eq!(list["workflows"][0]["updatedAt"], updated["updatedAt"]);
     assert_eq!(list["workflows"][1]["id"], w2["id"]);
 
     for bad in

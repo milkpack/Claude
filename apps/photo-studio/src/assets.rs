@@ -52,6 +52,9 @@ pub struct StoredAsset {
     pub params: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job_id: Option<String>,
+    /// The handoff task this file was returned to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_name: Option<String>,
 }
@@ -79,6 +82,8 @@ pub struct Asset {
     pub params: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
 }
 
 impl StoredAsset {
@@ -97,6 +102,7 @@ impl StoredAsset {
             mode: self.mode.clone(),
             params: self.params.clone(),
             job_id: self.job_id.clone(),
+            task_id: self.task_id.clone(),
         }
     }
 
@@ -118,6 +124,7 @@ pub struct NewAsset {
     pub mode: Option<String>,
     pub params: Option<Value>,
     pub job_id: Option<String>,
+    pub task_id: Option<String>,
     pub file_name: Option<String>,
 }
 
@@ -207,6 +214,7 @@ impl Assets {
             mode: meta.mode,
             params: meta.params,
             job_id: meta.job_id,
+            task_id: meta.task_id,
             file_name: meta.file_name,
         };
         let json = serde_json::to_vec_pretty(&asset).map_err(|e| ApiError::internal(e.to_string()))?;

@@ -562,6 +562,7 @@ async fn store_output(app: &App, job: &StoredJob, out: &Output) -> Result<Stored
                     mode: Some(job.mode.clone()),
                     params: Some(job.params.clone()),
                     job_id: Some(job.id.clone()),
+                    task_id: None,
                     file_name: None,
                 };
                 return app.assets.create(AssetKind::Generation, bytes, meta).await.map_err(|e| e.message);

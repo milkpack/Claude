@@ -9,17 +9,20 @@ mod claude;
 mod cli;
 mod director;
 mod error;
+mod handoff;
 mod imaging;
 mod jobs;
 mod mcp;
 mod net;
 mod oauth;
 mod openart;
+mod prompts;
 mod review;
 mod server;
 mod skill;
 mod static_files;
 mod store;
+mod tasks;
 mod workflows;
 
 #[cfg(test)]

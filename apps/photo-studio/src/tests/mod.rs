@@ -3,6 +3,7 @@
 
 mod auth_tests;
 mod claude_tests;
+mod handoff_tests;
 mod jobs_tests;
 mod misc_tests;
 mod mock;
@@ -151,6 +152,14 @@ impl TestServer {
     pub async fn try_upload(&self, file_name: &str, bytes: Vec<u8>) -> Option<reqwest::Response> {
         let (ct, body) = multipart(&[("file", Some(file_name), &bytes)]);
         self.with_cookie(self.client.post(self.url("/api/assets"))).header(header::CONTENT_TYPE, ct).body(body).send().await.ok()
+    }
+
+    pub async fn with_headers(&self, method: reqwest::Method, path: &str, headers: &[(&str, &str)], body: Vec<u8>) -> reqwest::Response {
+        let mut rb = self.with_cookie(self.client.request(method, self.url(path))).body(body);
+        for (k, v) in headers {
+            rb = rb.header(*k, *v);
+        }
+        rb.send().await.unwrap()
     }
 
     pub async fn upload(&self, file_name: &str, bytes: Vec<u8>) -> reqwest::Response {

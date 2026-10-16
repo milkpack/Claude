@@ -105,7 +105,7 @@ pub struct DirectorResponse {
     pub notes: Option<String>,
 }
 
-const CONTRACT: &str = r#"# Output contract
+pub const CONTRACT: &str = r#"# Output contract
 
 Reply with one JSON object and nothing else: no prose before or after it, no code fences. It must
 match this TypeScript type:
@@ -164,7 +164,7 @@ quotes and runs your plan, and the Review node checks the results.\n\n\
 }
 
 /// The live image models, compactly, for the request.
-fn model_summary(raw: &Value) -> Vec<Value> {
+pub fn model_summary(raw: &Value) -> Vec<Value> {
     raw.get("models")
         .and_then(Value::as_array)
         .map(|ms| {
@@ -199,7 +199,7 @@ fn model_summary(raw: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn validate(resp: &DirectorResponse, allowed: &HashSet<&str>) -> Result<(), String> {
+pub fn validate(resp: &DirectorResponse, allowed: &HashSet<&str>) -> Result<(), String> {
     if resp.category.trim().is_empty() {
         return Err("category is empty".into());
     }

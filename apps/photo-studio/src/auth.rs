@@ -284,6 +284,59 @@ fn parse_forwarded(entry: &str) -> Option<IpAddr> {
     e.parse::<SocketAddr>().ok().map(|a| a.ip())
 }
 
+/// A sliding-window request limit per client ([`limit_key`]), for the public token routes.
+pub struct WindowLimiter {
+    max: usize,
+    window_ms: u64,
+    hits: Mutex<HashMap<IpAddr, VecDeque<u64>>>,
+}
+
+impl WindowLimiter {
+    pub fn new(max: usize, window_ms: u64) -> WindowLimiter {
+        WindowLimiter { max, window_ms, hits: Mutex::new(HashMap::new()) }
+    }
+
+    fn prune(&self, q: &mut VecDeque<u64>, now: u64) {
+        while q.front().is_some_and(|t| now.saturating_sub(*t) >= self.window_ms) {
+            q.pop_front();
+        }
+    }
+
+    /// Whether `ip` is under the limit (without counting).
+    pub fn allowed(&self, ip: IpAddr) -> bool {
+        let now = now_ms();
+        let mut m = lock(&self.hits);
+        match m.get_mut(&limit_key(ip)) {
+            Some(q) => {
+                self.prune(q, now);
+                q.len() < self.max
+            }
+            None => true,
+        }
+    }
+
+    /// Count a hit; `false` when `ip` was already at the limit (the hit isn't counted then).
+    pub fn hit(&self, ip: IpAddr) -> bool {
+        let now = now_ms();
+        let key = limit_key(ip);
+        let mut m = lock(&self.hits);
+        if !m.contains_key(&key) && m.len() >= MAX_TRACKED_IPS {
+            m.retain(|_, q| q.back().is_some_and(|t| now.saturating_sub(*t) < self.window_ms));
+            while m.len() >= MAX_TRACKED_IPS {
+                let Some(oldest) = m.iter().min_by_key(|(_, q)| q.back().copied().unwrap_or(0)).map(|(k, _)| *k) else { break };
+                m.remove(&oldest);
+            }
+        }
+        let q = m.entry(key).or_default();
+        self.prune(q, now);
+        if q.len() >= self.max {
+            return false;
+        }
+        q.push_back(now);
+        true
+    }
+}
+
 fn token_key(token: &str) -> String {
     store::hex(&store::sha256(token.as_bytes()))
 }
@@ -315,8 +368,12 @@ pub async fn csrf_guard(req: Request, next: Next) -> Response {
     }
     let ct = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
     let essence = ct.split(';').next().unwrap_or("").trim();
-    let upload = method == Method::POST && req.uri().path() == "/api/assets";
-    let ok = if upload { essence == "multipart/form-data" } else { essence == "application/json" };
+    let path = req.uri().path();
+    let upload = method == Method::POST && path == "/api/assets";
+    // Task results: JSON, or multipart with files.
+    let task_result = method == Method::POST && path.starts_with("/api/tasks/") && path.ends_with("/result");
+    let ok =
+        if upload { essence == "multipart/form-data" } else { essence == "application/json" || (task_result && essence == "multipart/form-data") };
     if ok {
         next.run(req).await
     } else {

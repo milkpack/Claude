@@ -100,7 +100,7 @@ pub struct ReviewResponse {
     pub fix: Option<Fix>,
 }
 
-const CONTRACT: &str = r#"# Output contract
+pub const CONTRACT: &str = r#"# Output contract
 
 Reply with one JSON object and nothing else: no prose before or after it, no code fences. It must
 match this TypeScript type:
@@ -144,7 +144,7 @@ fn valid_score(s: f64) -> bool {
     s.is_finite() && (1.0..=5.0).contains(&s)
 }
 
-fn validate(r: &ReviewResponse) -> Result<(), String> {
+pub fn validate(r: &ReviewResponse) -> Result<(), String> {
     let s = &r.scores;
     for (name, v) in [("realism", s.realism), ("skin", s.skin), ("light", s.light), ("anatomy", s.anatomy), ("brief", s.brief)] {
         if !valid_score(v) {
