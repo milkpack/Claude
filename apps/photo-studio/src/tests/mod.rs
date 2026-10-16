@@ -8,6 +8,7 @@ mod jobs_tests;
 mod misc_tests;
 mod mock;
 mod openart_tests;
+mod proxy_tests;
 mod regression_tests;
 mod routine_tests;
 mod upload_tests;
@@ -37,6 +38,7 @@ pub struct Config {
     pub data_dir: Option<PathBuf>,
     pub give_up: Option<Duration>,
     pub routine_env: Option<(String, String)>,
+    pub anthropic_proxy: Option<String>,
 }
 
 pub struct TestServer {
@@ -83,6 +85,7 @@ impl TestServer {
             allow_private_urls: true,
             routine_env: cfg.routine_env.clone(),
             routine_timeout: Duration::from_millis(400),
+            anthropic_proxy: cfg.anthropic_proxy.clone(),
         };
         let a = server::build(opts).unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();

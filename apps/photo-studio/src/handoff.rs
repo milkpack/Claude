@@ -119,12 +119,32 @@ pub async fn routine_status(State(app): State<Arc<App>>) -> Json<Value> {
 #[derive(Deserialize)]
 pub struct RoutineBody {
     url: String,
-    token: String,
+    #[serde(default)]
+    token: Option<String>,
+    /// A proxy URL; `null` or `""` removes it; absent keeps the saved one.
+    #[serde(default, deserialize_with = "present")]
+    proxy: Option<Value>,
+}
+
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(d).map(Some)
 }
 
 pub async fn routine_save(State(app): State<Arc<App>>, JsonBody(body): JsonBody<RoutineBody>) -> ApiResult<Json<Value>> {
-    app.routine.save(&body.url, &body.token).await?;
+    use crate::routine::ProxyChange;
+    let proxy = match body.proxy {
+        None => ProxyChange::Keep,
+        Some(Value::Null) => ProxyChange::Clear,
+        Some(Value::String(s)) if s.trim().is_empty() => ProxyChange::Clear,
+        Some(Value::String(s)) => ProxyChange::Set(s),
+        Some(_) => return Err(ApiError::bad_request("proxy must be a URL string or null")),
+    };
+    app.routine.save(&body.url, body.token.as_deref(), proxy).await?;
     Ok(Json(app.routine.status()))
+}
+
+pub async fn routine_check(State(app): State<Arc<App>>) -> Json<Value> {
+    Json(app.routine.check().await)
 }
 
 pub async fn routine_clear(State(app): State<Arc<App>>) -> ApiResult<Json<Value>> {

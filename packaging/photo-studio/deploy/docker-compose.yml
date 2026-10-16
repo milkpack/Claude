@@ -13,6 +13,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       PHOTO_STUDIO_CLAUDE_MODEL: ${PHOTO_STUDIO_CLAUDE_MODEL:-}
       PHOTO_STUDIO_CLAUDE_EFFORT: ${PHOTO_STUDIO_CLAUDE_EFFORT:-}
+      # Proxy for Anthropic traffic only (Claude API, cloud runs), for hosts where
+      # api.anthropic.com is blocked: http://, https:// or socks5h://[user:pass@]host:port.
+      # Empty means direct. A proxy saved in Settings → Cloud runs takes precedence.
+      PHOTO_STUDIO_ANTHROPIC_PROXY: ${PHOTO_STUDIO_ANTHROPIC_PROXY:-}
       # Caddy on the host is the only client, so the last X-Forwarded-For entry is the real
       # visitor (the login rate limit is per visitor, not per proxy). Same as --trust-proxy.
       PHOTO_STUDIO_TRUST_PROXY: "1"

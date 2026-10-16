@@ -66,6 +66,8 @@ pub struct Options {
     pub routine_env: Option<(String, String)>,
     /// How long a routine fire may take.
     pub routine_timeout: Duration,
+    /// Outbound proxy for Anthropic traffic only (`PHOTO_STUDIO_ANTHROPIC_PROXY`).
+    pub anthropic_proxy: Option<String>,
 }
 
 /// Shortest accepted owner password.
@@ -113,12 +115,15 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
     let secrets = opts.data_dir.join("secrets");
     store::ensure_dir(&opts.data_dir, false)?;
     store::ensure_dir(&secrets, true)?;
+    // OpenArt: never through a proxy (environment proxy variables included).
     let http = reqwest::Client::builder()
+        .no_proxy()
         .connect_timeout(Duration::from_secs(15))
         .user_agent(concat!("photo-studio/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| format!("HTTP client: {e}"))?;
     let fetch = crate::net::fetch_client(opts.allow_private_urls)?;
+    let anthropic = Arc::new(crate::net::AnthropicHttp::new(opts.anthropic_proxy.clone()).map_err(|e| format!("PHOTO_STUDIO_ANTHROPIC_PROXY: {e}"))?);
     let public = opts.public_url.trim_end_matches('/').to_string();
     let oauth = OAuth::load(
         OAuthConfig {
@@ -133,7 +138,7 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
     let claude = opts
         .anthropic_api_key
         .clone()
-        .map(|key| Claude::new(http.clone(), opts.anthropic_base_url.clone(), key, opts.claude_model.clone(), opts.claude_effort.clone()));
+        .map(|key| Claude::new(anthropic.clone(), opts.anthropic_base_url.clone(), key, opts.claude_model.clone(), opts.claude_effort.clone()));
     Ok(Arc::new(App {
         auth: Auth::load(&opts.password, secrets.join("sessions.json"), public.starts_with("https://"), opts.trust_proxy),
         openart: OpenArt::new(oauth, opts.openart_mcp_url, http.clone(), fetch.clone(), opts.allow_private_urls),
@@ -154,7 +159,14 @@ pub fn build(opts: Options) -> Result<Arc<App>, String> {
         public_url: public,
         token_limit: auth::WindowLimiter::new(TOKEN_REQUESTS_PER_MINUTE, 60_000),
         bad_token_limit: auth::WindowLimiter::new(BAD_TOKENS_PER_MINUTE, 60_000),
-        routine: crate::routine::Routine::load(secrets.join("routine.json"), opts.routine_env, opts.allow_private_urls, opts.routine_timeout)?,
+        routine: crate::routine::Routine::load(
+            secrets.join("routine.json"),
+            opts.routine_env,
+            opts.allow_private_urls,
+            opts.routine_timeout,
+            anthropic,
+            opts.anthropic_base_url.clone(),
+        )?,
     }))
 }
 
@@ -182,6 +194,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/tasks/{id}/cancel", post(crate::handoff::cancel_task))
         .route("/api/tasks/{id}/fire", post(crate::handoff::fire_task))
         .route("/api/settings/routine", get(crate::handoff::routine_status).post(crate::handoff::routine_save).delete(crate::handoff::routine_clear))
+        .route("/api/settings/routine/check", get(crate::handoff::routine_check))
         .route("/api/tasks/{id}/files/{name}", get(crate::handoff::task_file))
         .route_layer(from_fn_with_state(app.clone(), auth::require_session));
     Router::new()

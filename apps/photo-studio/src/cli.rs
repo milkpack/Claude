@@ -24,6 +24,9 @@ OPTIONS:
     --openart-issuer <URL>      OAuth authorization server, skipping protected-resource discovery
                                 [env: PHOTO_STUDIO_OPENART_ISSUER]
     --anthropic-base-url <URL>  Anthropic API [env: ANTHROPIC_BASE_URL] [default: https://api.anthropic.com]
+    --anthropic-proxy <URL>     Proxy for Anthropic traffic only (Claude API, cloud runs), for
+                                hosts where api.anthropic.com is blocked: http://, https:// or
+                                socks5h://[user:pass@]host:port [env: PHOTO_STUDIO_ANTHROPIC_PROXY]
     --trust-proxy               Take the client address for the login rate limit from the last
                                 X-Forwarded-For entry (only behind your own reverse proxy)
                                 [env: PHOTO_STUDIO_TRUST_PROXY=1]
@@ -62,6 +65,8 @@ pub struct Cli {
     pub trust_proxy: bool,
     /// Cloud-run routine (URL, token) from the environment.
     pub routine: Option<(String, String)>,
+    /// Outbound proxy for Anthropic traffic only.
+    pub anthropic_proxy: Option<String>,
 }
 
 impl std::fmt::Debug for Cli {
@@ -82,6 +87,7 @@ impl std::fmt::Debug for Cli {
             .field("anthropic_base_url", &self.anthropic_base_url)
             .field("trust_proxy", &self.trust_proxy)
             .field("routine", &self.routine.as_ref().map(|(u, _)| crate::routine::mask_url(u)))
+            .field("anthropic_proxy", &self.anthropic_proxy.as_deref().map(crate::net::mask_proxy))
             .finish()
     }
 }
@@ -146,6 +152,9 @@ impl Cli {
         let openart_issuer = pick("--openart-issuer", "PHOTO_STUDIO_OPENART_ISSUER").map(|u| http_url("--openart-issuer", &u)).transpose()?;
         let anthropic_base_url =
             http_url("--anthropic-base-url", &pick("--anthropic-base-url", "ANTHROPIC_BASE_URL").unwrap_or_else(|| DEFAULT_ANTHROPIC_URL.into()))?;
+        let anthropic_proxy = pick("--anthropic-proxy", "PHOTO_STUDIO_ANTHROPIC_PROXY")
+            .map(|p| crate::net::check_proxy_url(&p).map_err(|e| CliError::Bad(format!("--anthropic-proxy: {e}"))))
+            .transpose()?;
         let trust_proxy = trust_proxy || env("PHOTO_STUDIO_TRUST_PROXY").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
 
         // Secrets: environment only, and never trimmed beyond surrounding whitespace.
@@ -181,6 +190,7 @@ impl Cli {
             anthropic_base_url,
             trust_proxy,
             routine,
+            anthropic_proxy,
         })
     }
 }

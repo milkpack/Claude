@@ -10,6 +10,10 @@
 #                               to this server, so HTTPS works without one
 #   ANTHROPIC_API_KEY=sk-ant-…  enables the director and review nodes; default: the previous one
 #   PHOTO_STUDIO_CLAUDE_MODEL=… Claude model (default: the server's, claude-opus-5-5)
+#   ANTHROPIC_PROXY=socks5h://user:pass@host:1080
+#                               proxy for Anthropic traffic only (cloud runs, Claude API), where
+#                               api.anthropic.com is blocked (e.g. Russian hosting); http://,
+#                               https:// or socks5h://. Default: the previous one; "none" removes it
 #   PHOTO_STUDIO_PASSWORD=…     set a new owner password (default: keep the previous one; on the
 #                               first install a strong random one is generated)
 #   IMAGE=ghcr.io/...:tag       image to run (default: ghcr.io/milkpack/photo-studio:latest)
@@ -124,6 +128,18 @@ fi
 MODEL="${PHOTO_STUDIO_CLAUDE_MODEL:-$(env_get PHOTO_STUDIO_CLAUDE_MODEL)}"
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._-]+$ ]] || die "PHOTO_STUDIO_CLAUDE_MODEL=$MODEL: ожидается имя модели, например claude-opus-5-5"
 EFFORT="$(env_get PHOTO_STUDIO_CLAUDE_EFFORT)"
+if [ "${ANTHROPIC_PROXY:-}" = "none" ]; then
+  PROXY=""
+  echo "Прокси для Anthropic: убран"
+elif [ -n "${ANTHROPIC_PROXY:-}" ]; then
+  safe_value "$ANTHROPIC_PROXY" && [[ "$ANTHROPIC_PROXY" =~ ^(http|https|socks5|socks5h)://[^/]+$ ]] ||
+    die "ANTHROPIC_PROXY: ожидается http://, https:// или socks5h://[user:pass@]host:port (латиница, цифры и ._~@%+=,:/-)"
+  PROXY="$ANTHROPIC_PROXY"
+  echo "Прокси для Anthropic: из ANTHROPIC_PROXY"
+else
+  PROXY="$(env_get PHOTO_STUDIO_ANTHROPIC_PROXY)"
+  [ -z "$PROXY" ] || echo "Прокси для Anthropic: прежний"
+fi
 
 curl -fsSL --max-time 30 "$REPO_RAW/docker-compose.yml" -o "$DIR/docker-compose.yml" ||
   die "не удалось скачать docker-compose.yml с raw.githubusercontent.com"
@@ -138,6 +154,7 @@ curl -fsSL --max-time 30 "$REPO_RAW/docker-compose.yml" -o "$DIR/docker-compose.
     if [ -n "$API_KEY" ]; then printf 'ANTHROPIC_API_KEY=%s\n' "$API_KEY"; else printf '#ANTHROPIC_API_KEY=sk-ant-...\n'; fi
     if [ -n "$MODEL" ]; then printf 'PHOTO_STUDIO_CLAUDE_MODEL=%s\n' "$MODEL"; else printf '#PHOTO_STUDIO_CLAUDE_MODEL=claude-opus-5-5\n'; fi
     if [ -n "$EFFORT" ]; then printf 'PHOTO_STUDIO_CLAUDE_EFFORT=%s\n' "$EFFORT"; else printf '#PHOTO_STUDIO_CLAUDE_EFFORT=medium\n'; fi
+    if [ -n "$PROXY" ]; then printf 'PHOTO_STUDIO_ANTHROPIC_PROXY=%s\n' "$PROXY"; else printf '#PHOTO_STUDIO_ANTHROPIC_PROXY=socks5h://user:pass@host:1080\n'; fi
   } > "$DIR/.env.new"
 )
 chmod 600 "$DIR/.env.new"

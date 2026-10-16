@@ -105,6 +105,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         timing: jobs::JobTiming::default(),
         allow_private_urls: false,
         routine_env: cli.routine,
+        anthropic_proxy: cli.anthropic_proxy,
         routine_timeout: std::time::Duration::from_secs(30),
     };
     let app = server::build(opts)?;

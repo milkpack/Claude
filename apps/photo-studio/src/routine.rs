@@ -32,8 +32,18 @@ const SKILL_CUT_NOTE: &str = "\n\n[The photo skill was cut here to fit the run's
 pub struct RoutineConfig {
     pub url: String,
     pub token: String,
+    /// Outbound proxy for Anthropic traffic (may hold credentials: never sent back).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
     #[serde(default)]
     pub saved_at: u64,
+}
+
+/// What a settings save does to the proxy.
+pub enum ProxyChange {
+    Keep,
+    Clear,
+    Set(String),
 }
 
 /// The outcome of the last fire of a task.
@@ -66,10 +76,14 @@ pub struct Routine {
     env: Option<RoutineConfig>,
     stored: Mutex<Option<RoutineConfig>>,
     fires: Mutex<VecDeque<u64>>,
-    http: reqwest::Client,
+    http: std::sync::Arc<crate::net::AnthropicHttp>,
+    /// Probed by [`Routine::check`] (`https://api.anthropic.com` in production).
+    probe_url: String,
     allow_private: bool,
     timeout: Duration,
 }
+
+const UNREACHABLE: &str = "the server couldn't reach api.anthropic.com (blocked in some countries): set an Anthropic proxy in Settings → Cloud runs";
 
 /// Checks a routine URL: `https://api.anthropic.com/v1/claude_code/routines/<id>/fire` (any http
 /// host with `allow_private`, for tests).
@@ -106,12 +120,19 @@ pub fn mask_url(url: &str) -> String {
 }
 
 impl Routine {
-    pub fn load(file: PathBuf, env: Option<(String, String)>, allow_private: bool, timeout: Duration) -> Result<Routine, String> {
+    pub fn load(
+        file: PathBuf,
+        env: Option<(String, String)>,
+        allow_private: bool,
+        timeout: Duration,
+        http: std::sync::Arc<crate::net::AnthropicHttp>,
+        probe_url: String,
+    ) -> Result<Routine, String> {
         let env = match env {
             Some((url, token)) => {
                 let url = check_url(&url, allow_private).map_err(|e| format!("PHOTO_STUDIO_ROUTINE_URL: {e}"))?;
                 let token = check_token(&token).map_err(|e| format!("PHOTO_STUDIO_ROUTINE_TOKEN: {e}"))?;
-                Some(RoutineConfig { url, token, saved_at: 0 })
+                Some(RoutineConfig { url, token, proxy: None, saved_at: 0 })
             }
             None => None,
         };
@@ -123,13 +144,8 @@ impl Routine {
                 None
             }
         };
-        let http = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(10))
-            .user_agent(concat!("photo-studio/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|e| format!("HTTP client: {e}"))?;
-        Ok(Routine { file, env, stored: Mutex::new(stored), fires: Mutex::new(VecDeque::new()), http, allow_private, timeout })
+        http.set_settings_proxy(stored.as_ref().and_then(|c| c.proxy.clone()).filter(|p| crate::net::check_proxy_url(p).is_ok()));
+        Ok(Routine { file, env, stored: Mutex::new(stored), fires: Mutex::new(VecDeque::new()), http, probe_url, allow_private, timeout })
     }
 
     fn current(&self) -> Option<(RoutineConfig, &'static str)> {
@@ -145,28 +161,45 @@ impl Routine {
 
     /// `GET /api/settings/routine`: never the token.
     pub fn status(&self) -> Value {
-        match self.current() {
+        let mut v = match self.current() {
             Some((c, source)) => json!({ "configured": true, "url": mask_url(&c.url), "source": source }),
             None => json!({ "configured": false }),
+        };
+        if let Some((p, source)) = self.http.proxy() {
+            v["proxy"] = json!(crate::net::mask_proxy(&p));
+            v["proxySource"] = json!(source);
         }
+        v
     }
 
-    pub async fn save(&self, url: &str, token: &str) -> ApiResult<()> {
+    /// Save the routine. Without `token`, the saved one is kept (to change only the proxy).
+    pub async fn save(&self, url: &str, token: Option<&str>, proxy: ProxyChange) -> ApiResult<()> {
         let url = check_url(url, self.allow_private).map_err(ApiError::bad_request)?;
-        let token = check_token(token).map_err(ApiError::bad_request)?;
-        let cfg = RoutineConfig { url, token, saved_at: now_ms() };
+        let previous = lock(&self.stored).clone();
+        let token = match token.map(str::trim).filter(|t| !t.is_empty()) {
+            Some(t) => check_token(t).map_err(ApiError::bad_request)?,
+            None => previous.as_ref().map(|c| c.token.clone()).ok_or_else(|| ApiError::bad_request("token is required"))?,
+        };
+        let proxy = match proxy {
+            ProxyChange::Keep => previous.and_then(|c| c.proxy),
+            ProxyChange::Clear => None,
+            ProxyChange::Set(p) => Some(crate::net::check_proxy_url(&p).map_err(ApiError::bad_request)?),
+        };
+        let cfg = RoutineConfig { url, token, proxy: proxy.clone(), saved_at: now_ms() };
         let bytes = serde_json::to_vec_pretty(&cfg).map_err(|e| ApiError::internal(e.to_string()))?;
         store::write_atomic_async(self.file.clone(), bytes, true).await.map_err(|e| {
             warn!("saving the routine: {e}");
             ApiError::internal("can't save the routine")
         })?;
         *lock(&self.stored) = Some(cfg);
+        self.http.set_settings_proxy(proxy);
         info!("cloud routine set");
         Ok(())
     }
 
     pub async fn clear(&self) -> ApiResult<()> {
         *lock(&self.stored) = None;
+        self.http.set_settings_proxy(None);
         match tokio::fs::remove_file(&self.file).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -200,8 +233,17 @@ impl Routine {
         if !self.take_slot() {
             return RunState::failed(format!("Photo Studio's limit of {MAX_FIRES_PER_HOUR} cloud runs per hour is reached; try again later"));
         }
-        let req = self
-            .http
+        let via_proxy = self.http.proxy().is_some();
+        let client = match self.http.client() {
+            Ok(c) => c,
+            Err(e) => return RunState::failed(e),
+        };
+        let unreachable = if via_proxy {
+            "the server couldn't reach api.anthropic.com through the Anthropic proxy: check it in Settings → Cloud runs"
+        } else {
+            UNREACHABLE
+        };
+        let req = client
             .post(&cfg.url)
             .timeout(self.timeout)
             .bearer_auth(&cfg.token)
@@ -211,7 +253,8 @@ impl Routine {
         let ambiguous = "the run may or may not have started: check claude.ai/code before running it again";
         let resp = match req.send().await {
             Ok(r) => r,
-            Err(e) if e.is_connect() => return RunState::failed(format!("couldn't reach Claude: {}", neterr(e))),
+            Err(e) if e.is_connect() => return RunState::failed(format!("{unreachable} ({})", neterr(e))),
+            Err(e) if e.is_timeout() => return RunState::failed(format!("{unreachable} (timed out; if it did get through, {ambiguous})")),
             Err(e) => return RunState::failed(format!("{} ({ambiguous})", neterr(e))),
         };
         let status = resp.status();
@@ -241,6 +284,29 @@ impl Routine {
         };
         warn!("cloud run failed: {error}");
         RunState::failed(error)
+    }
+}
+
+impl Routine {
+    /// Can the server reach api.anthropic.com by the configured path? Any HTTP answer counts.
+    pub async fn check(&self) -> Value {
+        let via = if self.http.proxy().is_some() { "proxy" } else { "direct" };
+        let client = match self.http.client() {
+            Ok(c) => c,
+            Err(e) => return json!({ "reachable": false, "via": via, "error": e }),
+        };
+        match client.get(&self.probe_url).timeout(Duration::from_secs(10)).send().await {
+            Ok(r) => json!({ "reachable": true, "via": via, "status": r.status().as_u16() }),
+            Err(e) => {
+                let why = if e.is_timeout() { "timed out".to_string() } else { neterr(e) };
+                let hint = if via == "proxy" {
+                    "check the Anthropic proxy"
+                } else {
+                    "set an Anthropic proxy (api.anthropic.com is blocked in some countries)"
+                };
+                json!({ "reachable": false, "via": via, "error": format!("couldn't reach api.anthropic.com ({why}): {hint}") })
+            }
+        }
     }
 }
 

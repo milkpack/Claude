@@ -491,3 +491,67 @@ async fn fire(State(s): State<Arc<RoutineState>>, headers: HeaderMap, body: Byte
     }
     resp
 }
+
+// ---- a forward HTTP proxy ----
+
+/// A minimal forward proxy for plain-http targets: records each request line and its
+/// `Proxy-Authorization`, then relays the connection to the target.
+/// (request line, Proxy-Authorization) of each proxied request.
+pub type ProxyLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
+pub struct MockProxy {
+    pub url: String,
+    pub seen: ProxyLog,
+}
+
+impl MockProxy {
+    pub async fn start() -> MockProxy {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen: ProxyLog = Arc::default();
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut client, _)) = listener.accept().await else { return };
+                let log = log.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        let n = client.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 || buf.len() > 65536 {
+                            return;
+                        }
+                        buf.extend_from_slice(&chunk[..n]);
+                    }
+                    let head = String::from_utf8_lossy(&buf).to_string();
+                    let line = head.lines().next().unwrap_or("").to_string();
+                    let auth = head
+                        .lines()
+                        .find_map(|l| l.strip_prefix("proxy-authorization: ").or_else(|| l.strip_prefix("Proxy-Authorization: ")))
+                        .map(str::to_string);
+                    log.lock().unwrap().push((line.clone(), auth));
+                    let uri = line.split(' ').nth(1).unwrap_or("");
+                    let Some(hostport) = uri.strip_prefix("http://").and_then(|r| r.split('/').next()) else {
+                        let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\n\r\n").await;
+                        return;
+                    };
+                    let Ok(mut upstream) = tokio::net::TcpStream::connect(hostport).await else {
+                        let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\n\r\n").await;
+                        return;
+                    };
+                    if upstream.write_all(&buf).await.is_err() {
+                        return;
+                    }
+                    let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
+                });
+            }
+        });
+        MockProxy { url: format!("http://{addr}"), seen }
+    }
+
+    pub fn requests(&self) -> Vec<(String, Option<String>)> {
+        self.seen.lock().unwrap().clone()
+    }
+}

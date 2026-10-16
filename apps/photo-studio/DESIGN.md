@@ -361,3 +361,12 @@ task's link. The node picks up the result as usual by polling `/api/tasks/:id`.
 5. Turn on "Run in the cloud" on Director, Review, Sketch or Custom nodes, or press **Run in cloud** on a task card. The task card links to the session (`run.sessionUrl`) so it can be watched live.
 
 Each run uses subscription usage like an interactive session. "Fired" means a session started, not that the task succeeded: the result arriving on the task is the success signal.
+
+**Hosts where api.anthropic.com is blocked** (for example Russian hosting, where requests time out). Anthropic traffic, meaning the Claude API and routine fires, can go through an outbound proxy. No other traffic uses it: every other client (OpenArt, CDN downloads, uploads) ignores proxies, including the `HTTP(S)_PROXY` environment variables.
+- **Setting it:**
+  - `PHOTO_STUDIO_ANTHROPIC_PROXY` (or `--anthropic-proxy`) takes `http://`, `https://`, `socks5://` or `socks5h://`, with an optional `user:pass@` and a port. Use `socks5h` so that DNS is resolved by the proxy.
+  - With the installer: `ANTHROPIC_PROXY=socks5h://user:pass@host:1080` is written to `.env`, and `ANTHROPIC_PROXY=none` removes it.
+  - In the app: Settings → Cloud runs → Proxy, sent as `POST /api/settings/routine {url, token?, proxy}`. `proxy: null` or `""` removes it; leaving the field out keeps the saved one; leaving out `token` keeps the saved token. The settings proxy takes precedence over the environment variable.
+- **Never sent back:** the proxy URL is stored with the token in `secrets/routine.json`. `GET /api/settings/routine` shows only `proxy: "socks5h://host:port"` (no credentials) and `proxySource`.
+- **Check connection:** `GET /api/settings/routine/check` makes one request to https://api.anthropic.com/ by the configured path, with a 10 s timeout. Any HTTP status means reachable. It returns `{reachable, via: "direct" | "proxy", status? | error?}`.
+- When a fire can't reach Anthropic directly, the run's error says: "the server couldn't reach api.anthropic.com (blocked in some countries): set an Anthropic proxy in Settings → Cloud runs".

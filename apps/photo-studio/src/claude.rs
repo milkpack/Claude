@@ -31,7 +31,7 @@ pub enum Part {
 }
 
 pub struct Claude {
-    http: reqwest::Client,
+    http: std::sync::Arc<crate::net::AnthropicHttp>,
     base_url: String,
     api_key: String,
     pub model: String,
@@ -61,7 +61,7 @@ fn supports_default_fallback(model: &str) -> bool {
 }
 
 impl Claude {
-    pub fn new(http: reqwest::Client, base_url: String, api_key: String, model: String, effort: String) -> Claude {
+    pub fn new(http: std::sync::Arc<crate::net::AnthropicHttp>, base_url: String, api_key: String, model: String, effort: String) -> Claude {
         Claude { http, base_url: base_url.trim_end_matches('/').to_string(), api_key, model, effort }
     }
 
@@ -106,9 +106,9 @@ impl Claude {
     async fn send(&self, what: &str, body: Vec<u8>) -> ApiResult<String> {
         let url = format!("{}/v1/messages", self.base_url);
         let mut attempt = 0u32;
+        let client = self.http.client().map_err(ApiError::internal)?;
         loop {
-            let mut req = self
-                .http
+            let mut req = client
                 .post(&url)
                 .timeout(REQUEST_TIMEOUT)
                 .header("x-api-key", &self.api_key)
@@ -231,7 +231,13 @@ mod tests {
 
     #[test]
     fn request_shape() {
-        let c = Claude::new(reqwest::Client::new(), "http://x/".into(), "k".into(), "claude-opus-5-5".into(), "medium".into());
+        let c = Claude::new(
+            std::sync::Arc::new(crate::net::AnthropicHttp::new(None).unwrap()),
+            "http://x/".into(),
+            "k".into(),
+            "claude-opus-5-5".into(),
+            "medium".into(),
+        );
         let b = c.request_body("sys", &[Part::Text("hi".into()), Part::Jpeg(vec![1, 2, 3])]);
         assert_eq!(b["model"], "claude-opus-5-5");
         assert_eq!(b["thinking"], json!({"type":"adaptive"}));
@@ -240,7 +246,13 @@ mod tests {
         assert_eq!(b["system"][0]["cache_control"], json!({"type":"ephemeral"}));
         assert_eq!(b["messages"][0]["content"][1]["source"]["media_type"], "image/jpeg");
         assert_eq!(b["messages"][0]["content"][1]["source"]["data"], "AQID");
-        let old = Claude::new(reqwest::Client::new(), "http://x".into(), "k".into(), "claude-haiku-4-5".into(), "medium".into());
+        let old = Claude::new(
+            std::sync::Arc::new(crate::net::AnthropicHttp::new(None).unwrap()),
+            "http://x".into(),
+            "k".into(),
+            "claude-haiku-4-5".into(),
+            "medium".into(),
+        );
         let b = old.request_body("s", &[]);
         assert!(b.get("thinking").is_none() && b.get("fallbacks").is_none());
     }

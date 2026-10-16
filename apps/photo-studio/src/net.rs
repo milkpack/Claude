@@ -137,6 +137,7 @@ pub fn fetch_client(allow_private: bool) -> Result<reqwest::Client, String> {
         }
     });
     reqwest::Client::builder()
+        .no_proxy()
         .connect_timeout(Duration::from_secs(15))
         .redirect(policy)
         .user_agent(concat!("photo-studio/", env!("CARGO_PKG_VERSION")))
@@ -144,9 +145,98 @@ pub fn fetch_client(allow_private: bool) -> Result<reqwest::Client, String> {
         .map_err(|e| format!("HTTP client: {e}"))
 }
 
+/// Check an outbound proxy URL: `http://`, `https://`, `socks5://` or `socks5h://`, a host, an
+/// optional port and `user:pass`, nothing else.
+pub fn check_proxy_url(url: &str) -> Result<String, String> {
+    let u = reqwest::Url::parse(url.trim()).map_err(|_| "the proxy is not a URL (e.g. socks5h://user:pass@host:1080)".to_string())?;
+    let scheme_ok = matches!(u.scheme(), "http" | "https" | "socks5" | "socks5h");
+    if !scheme_ok || u.host_str().is_none_or(str::is_empty) || !matches!(u.path(), "" | "/") || u.query().is_some() || u.fragment().is_some() {
+        return Err("the proxy must be http://, https://, socks5:// or socks5h:// with a host (and optional user:pass and port)".into());
+    }
+    Ok(u.to_string().trim_end_matches('/').to_string())
+}
+
+/// A proxy URL without its credentials, for display: `socks5h://host:1080`.
+pub fn mask_proxy(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(u) => {
+            let port = u.port().map(|p| format!(":{p}")).unwrap_or_default();
+            format!("{}://{}{port}", u.scheme(), u.host_str().unwrap_or(""))
+        }
+        Err(_) => "(invalid proxy)".into(),
+    }
+}
+
+/// HTTP for Anthropic (the Claude API and routine fires): the only traffic that may go through a
+/// proxy, because api.anthropic.com is unreachable from some countries. The proxy saved in the
+/// cloud-run settings wins over `PHOTO_STUDIO_ANTHROPIC_PROXY`. Without one, no proxy is used
+/// (environment proxy variables are ignored).
+pub struct AnthropicHttp {
+    env_proxy: Option<String>,
+    settings_proxy: std::sync::Mutex<Option<String>>,
+    cache: std::sync::Mutex<Option<(Option<String>, reqwest::Client)>>,
+}
+
+impl AnthropicHttp {
+    pub fn new(env_proxy: Option<String>) -> Result<AnthropicHttp, String> {
+        let env_proxy = env_proxy.map(|p| check_proxy_url(&p)).transpose()?;
+        Ok(AnthropicHttp { env_proxy, settings_proxy: std::sync::Mutex::new(None), cache: std::sync::Mutex::new(None) })
+    }
+
+    pub fn set_settings_proxy(&self, proxy: Option<String>) {
+        *crate::store::lock(&self.settings_proxy) = proxy;
+    }
+
+    /// The proxy in use and where it comes from ("settings" or "env").
+    pub fn proxy(&self) -> Option<(String, &'static str)> {
+        if let Some(p) = crate::store::lock(&self.settings_proxy).clone() {
+            return Some((p, "settings"));
+        }
+        self.env_proxy.clone().map(|p| (p, "env"))
+    }
+
+    /// The client for the current proxy (rebuilt when it changes).
+    pub fn client(&self) -> Result<reqwest::Client, String> {
+        let proxy = self.proxy().map(|(p, _)| p);
+        let mut cache = crate::store::lock(&self.cache);
+        if let Some((p, c)) = cache.as_ref()
+            && *p == proxy
+        {
+            return Ok(c.clone());
+        }
+        let mut b = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(15))
+            .user_agent(concat!("photo-studio/", env!("CARGO_PKG_VERSION")));
+        if let Some(p) = &proxy {
+            b = b.proxy(reqwest::Proxy::all(p).map_err(|_| format!("invalid Anthropic proxy {}", mask_proxy(p)))?);
+        }
+        let c = b.build().map_err(|e| format!("HTTP client: {e}"))?;
+        *cache = Some((proxy, c.clone()));
+        Ok(c)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proxies() {
+        assert_eq!(check_proxy_url("socks5h://u:p@proxy.example:1080").unwrap(), "socks5h://u:p@proxy.example:1080");
+        assert_eq!(check_proxy_url("http://10.0.0.1:3128/").unwrap(), "http://10.0.0.1:3128");
+        for bad in ["ftp://x:1", "socks5h://", "http://x/path", "nope", "http://x?q=1"] {
+            assert!(check_proxy_url(bad).is_err(), "{bad}");
+        }
+        assert_eq!(mask_proxy("socks5h://user:secret@proxy.example:1080"), "socks5h://proxy.example:1080");
+        let a = AnthropicHttp::new(Some("http://env.example:1".into())).unwrap();
+        assert_eq!(a.proxy(), Some(("http://env.example:1".to_string(), "env")));
+        a.set_settings_proxy(Some("socks5h://s.example:2".into()));
+        assert_eq!(a.proxy().unwrap().1, "settings");
+        assert!(a.client().is_ok());
+        assert!(AnthropicHttp::new(Some("bad".into())).is_err());
+    }
 
     #[tokio::test]
     async fn upstream_urls() {
