@@ -242,3 +242,74 @@ installer writes the same import line, so re-running it keeps Photo Studio's sit
 
 Locally: `docker build -f packaging/photo-studio/Dockerfile -t photo-studio .` and
 `docker run -p 8787:8787 -v ps-data:/data -e PHOTO_STUDIO_PASSWORD='at least 12 chars' photo-studio`.
+
+## Handoff mode (no Anthropic API) — 2026-10-16
+
+The owner has a Claude subscription, not API billing. Every node that needs Claude's judgement
+(Director, Review, Blender, Photoshop, Sketch-review) therefore works as a **handoff**: the node
+builds a complete task for Claude, the owner pastes it into Claude (desktop app / Claude Code on
+the Mac, or a cloud session), and the answer comes back into the node. When `ANTHROPIC_API_KEY`
+is set, Director and Review may still run directly; handoff is the default.
+
+### Sessions
+A session is a project: one canvas (the existing workflow), its assets and its task list.
+The top bar gets a session switcher (list, create, rename, duplicate, delete, last-opened
+first); the canvas URL carries the session id (`#s-<id>`). Server: workflows gain `kind:"session"`
+fields `createdAt`, `lastOpenedAt`, `cover` (asset id) — no new storage.
+
+### Tasks
+```ts
+type TaskKind = "director" | "review" | "blender" | "photoshop" | "sketch" | "custom";
+type Task = {
+  id: string; sessionId: string; nodeId: string; kind: TaskKind;
+  status: "open" | "done" | "cancelled";
+  title: string;
+  prompt: string;            // the full text to paste into Claude (markdown)
+  inputs: string[];          // asset ids the task refers to
+  links: { assetId: string; url: string }[];  // tokenised public links (no login), valid 7 days
+  returnUrl: string;         // tokenised page/API where Claude or the owner returns results
+  result?: { text?: string; assets: Asset[]; json?: unknown; at: number };
+  createdAt: number; updatedAt: number;
+};
+// POST /api/tasks {sessionId, nodeId, kind, title?, instructions?, inputs, context?} → Task
+// GET  /api/tasks?sessionId=&status=   → {tasks}
+// GET  /api/tasks/:id                  → Task
+// POST /api/tasks/:id/result  (session cookie) JSON {text?, json?} or multipart files[] + text
+// POST /api/tasks/:id/cancel
+// Public, token-authorised (for Claude running elsewhere; token = 256-bit random per task):
+// GET  /t/:token                → a minimal page: the task text + inputs + an upload form
+// GET  /t/:token/inputs/:assetId → the input file
+// POST /t/:token/result          → multipart files[] + text/json (same as above), ≤ 30 MB/file, ≤ 20 files
+```
+The server writes `prompt` from templates per kind, built from the photo skill (no LLM): the
+brief and node settings, each input as a numbered link with its role, the instructions for the
+kind, and the **exact return format**:
+
+- director → a fenced JSON block matching `DirectorResponse` (pasting it into the node fills
+  the plan, prompt, params and preserve list);
+- review → a JSON block matching `ReviewResponse`;
+- blender → build the described scene in Blender, render the requested views (PNG) and return
+  them via the return link, plus a one-paragraph note and the .blend if asked;
+- photoshop → open input 1, make only the described local change (selection from the given
+  mask/region, retouch, generative/content-aware fill, adjustment), keep everything else
+  pixel-identical, return the PNG (and PSD if asked);
+- sketch → return an annotated PNG (arrows, circles, numbered notes) and the list of issues;
+- custom → free text instructions.
+
+Every prompt ends with: how to download the inputs (`curl` lines with the public links) and how
+to return results (`curl -F files=@out.png -F text=… <returnUrl>`), so Claude Code can do the
+round trip itself; a person can use the same page in a browser.
+
+### Nodes
+- Director / Review: if Claude isn't configured, the node shows **Handoff**: "Create task" →
+  task card with Copy, Open return page, status; when the result arrives (polling `/api/tasks/:id`)
+  the JSON is parsed into the node exactly like a direct run. A "Paste answer" box accepts the
+  JSON manually too.
+- Blender: brief for the scene (subject, set, camera, lens, light), inputs (references), output:
+  rendered images → image wire.
+- Photoshop: input image + optional mask (drawn on the image in the node, exported as PNG) +
+  instruction ("change only …"), output: edited image.
+- Sketch: draws in the browser on top of an input image (pen, arrow, circle, text, colours,
+  undo) and saves the overlay + a flattened PNG as assets; "Ask Claude to mark issues" creates a
+  `sketch` task. Its outputs (image + notes text) wire into Edit/Generate as references or
+  instructions.
