@@ -174,3 +174,14 @@ test('cloud routine', async ({ page }) => {
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(OUT, '12-settings-routine-desktop-dark.png') });
 });
+
+test('routine proxy settings', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/?mock=fast,routine,proxy');
+  await page.locator('.empty-card').waitFor();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const sec = page.getByTestId('routine-settings');
+  await sec.getByRole('button', { name: 'Check connection' }).click();
+  await expect(sec.locator('.check-result')).toContainText('Reachable via proxy');
+  await sec.screenshot({ path: join(OUT, '13-settings-proxy.png') });
+});

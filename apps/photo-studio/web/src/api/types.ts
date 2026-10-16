@@ -229,7 +229,16 @@ export type TaskRequest = {
   auto?: boolean;
 };
 
-export type RoutineSettings = { configured: boolean; url?: string; source?: string };
+export type RoutineSettings = {
+  configured: boolean;
+  url?: string;
+  source?: string;
+  /** Saved proxy, masked by the server (credentials hidden). */
+  proxy?: string;
+  proxySource?: string;
+};
+
+export type RoutineCheck = { reachable: boolean; via: 'direct' | 'proxy'; status?: number; error?: string };
 
 /** Session metadata carried on workflows (`kind: "session"`). */
 export type SessionMeta = { kind?: 'session'; createdAt?: number; lastOpenedAt?: number; cover?: string };

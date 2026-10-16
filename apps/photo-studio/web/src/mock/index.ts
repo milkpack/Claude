@@ -24,7 +24,7 @@ const state = {
   failedLogins: [] as number[],
   openart: { connected: !flags.has('noopenart'), needsReconnect: flags.has('reconnect'), email: 'studio@example.com', plan: 'Infinite' },
   claude: !flags.has('noclaude'),
-  routine: flags.has('routine') ? { url: 'https://api.anthropic.com/v1/claude_code/routines/trig_mock/fire', token: 'x' } : (null as { url: string; token: string } | null),
+  routine: flags.has('routine') ? { url: 'https://api.anthropic.com/v1/claude_code/routines/trig_mock/fire', token: 'x', proxy: flags.has('proxy') ? 'socks5h://studio:secret@10.0.0.5:1080' : '' } : (null as { url: string; token: string; proxy: string } | null),
   balance: flags.has('broke') ? 120 : 12_480,
   assets: [] as Asset[],
   jobs: new Map<string, Job>(),
@@ -454,13 +454,31 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
     return json(200, review(b as unknown as Parameters<typeof review>[0]));
   }
 
+  if (path === '/api/settings/routine/check') {
+    await sleep(600 * speed);
+    if (!state.routine) return err(400, 'No routine is configured.', 'bad_request');
+    if (flags.has('blocked') && !state.routine.proxy) return json(200, { reachable: false, via: 'direct', error: 'connect api.anthropic.com:443: connection refused (blocked network?) — set a proxy' });
+    return json(200, { reachable: true, via: state.routine.proxy ? 'proxy' : 'direct', status: 200 });
+  }
   if (path === '/api/settings/routine') {
     if (method === 'POST') {
       const b = await body(init);
-      if (typeof b.url !== 'string' || !/^https:\/\//.test(b.url) || typeof b.token !== 'string' || !b.token) return err(400, 'An https URL and a token are required.', 'bad_request');
-      state.routine = { url: b.url, token: b.token };
+      const token = typeof b.token === 'string' && b.token ? b.token : state.routine?.token;
+      if (typeof b.url !== 'string' || !/^https:\/\//.test(b.url) || !token) return err(400, 'An https URL and a token are required.', 'bad_request');
+      let proxy = state.routine?.proxy ?? '';
+      if (b.proxy === null || b.proxy === '') proxy = '';
+      else if (typeof b.proxy === 'string') {
+        if (!/^(socks5h?|https?):\/\//.test(b.proxy)) return err(400, 'The proxy must be a socks5h://, socks5://, http:// or https:// URL.', 'bad_request');
+        proxy = b.proxy;
+      }
+      state.routine = { url: b.url, token, proxy };
     } else if (method === 'DELETE') state.routine = null;
-    return json(200, { configured: Boolean(state.routine), ...(state.routine ? { url: state.routine.url, source: 'settings' } : {}) });
+    const masked = state.routine?.proxy ? state.routine.proxy.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:•••@') : undefined;
+    return json(200, {
+      configured: Boolean(state.routine),
+      ...(state.routine ? { url: state.routine.url, source: 'settings' } : {}),
+      ...(masked ? { proxy: masked, proxySource: 'settings' } : {}),
+    });
   }
   if (path === '/api/tasks' && method === 'POST') {
     const b = await body(init);

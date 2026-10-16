@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Cloud, LogOut, RefreshCw, Trash, Unplug, X } from 'lucide-react';
+import { Activity, Cloud, LogOut, RefreshCw, Trash, Unplug, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { describeError } from '../api/errors';
@@ -29,14 +29,34 @@ function RoutineSection() {
   const q = useQuery({ queryKey: ['routine'], queryFn: api.routine, retry: false });
   const [url, setUrl] = useState('');
   const [token, setToken] = useState('');
+  const [proxy, setProxy] = useState('');
   const [busy, setBusy] = useState(false);
+  const [check, setCheck] = useState<{ busy: boolean; text?: string; ok?: boolean }>({ busy: false });
   const r = q.data;
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['routine'] });
     await queryClient.invalidateQueries({ queryKey: qk.me });
   };
+  const saveUrl = url.trim() || r?.url || '';
+  const canSave = Boolean(saveUrl) && (Boolean(token.trim()) || Boolean(r?.configured)) && Boolean(url.trim() || token.trim() || proxy.trim());
+  const save = async (body: { url: string; token?: string; proxy?: string | null }, done: string) => {
+    setBusy(true);
+    try {
+      await api.saveRoutine(body);
+      setToken('');
+      setUrl('');
+      setProxy('');
+      setCheck({ busy: false });
+      await refresh();
+      toast(done, 'ok');
+    } catch (err) {
+      toast(describeError(err).detail, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <section className="set-section">
+    <section className="set-section" data-testid="routine-settings">
       <h3>Cloud runs (Claude routine)</h3>
       <div className="set-row">
         <span className={`dot ${r?.configured ? 'dot-ok' : 'dot-off'}`} />
@@ -58,21 +78,13 @@ function RoutineSection() {
       </div>
       <form
         className="routine-form"
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
-          if (!url.trim() || !token.trim()) return;
-          setBusy(true);
-          try {
-            await api.saveRoutine(url.trim(), token.trim());
-            setToken('');
-            setUrl('');
-            await refresh();
-            toast('Cloud runs configured', 'ok');
-          } catch (err) {
-            toast(describeError(err).detail, 'error');
-          } finally {
-            setBusy(false);
-          }
+          if (!canSave) return;
+          void save(
+            { url: saveUrl, ...(token.trim() ? { token: token.trim() } : {}), ...(proxy.trim() ? { proxy: proxy.trim() } : {}) },
+            'Cloud runs saved',
+          );
         }}
       >
         <label className="login-field">
@@ -81,12 +93,56 @@ function RoutineSection() {
         </label>
         <label className="login-field">
           <span>Token</span>
-          <input type="password" value={token} placeholder={r?.configured ? 'stored · enter a new one to replace it' : ''} onChange={(e) => setToken(e.target.value)} autoComplete="new-password" />
+          <input type="password" value={token} placeholder={r?.configured ? 'stored · leave empty to keep it' : ''} onChange={(e) => setToken(e.target.value)} autoComplete="new-password" />
+        </label>
+        <label className="login-field">
+          <span>Proxy (optional)</span>
+          <input className="mono" value={proxy} placeholder={r?.proxy ?? 'socks5h://user:pass@host:1080'} onChange={(e) => setProxy(e.target.value)} autoComplete="off" spellCheck={false} />
+          <span className="field-hint">
+            Only for Anthropic; needed where api.anthropic.com is blocked.
+            {r?.proxy ? (
+              <>
+                {' '}
+                Saved: <span className="mono">{r.proxy}</span>
+                {r.proxySource ? ` (from ${r.proxySource})` : ''}
+              </>
+            ) : null}
+          </span>
         </label>
         <div className="set-actions">
-          <Button type="submit" size="sm" variant="primary" icon={Cloud} busy={busy} disabled={!url.trim() || !token.trim()}>
-            {r?.configured ? 'Replace' : 'Save'}
+          <Button type="submit" size="sm" variant="primary" icon={Cloud} busy={busy} disabled={!canSave}>
+            {r?.configured ? 'Save changes' : 'Save'}
           </Button>
+          <Button
+            size="sm"
+            icon={Activity}
+            busy={check.busy}
+            disabled={!r?.configured}
+            onClick={async () => {
+              setCheck({ busy: true });
+              try {
+                const c = await api.checkRoutine();
+                setCheck({
+                  busy: false,
+                  ok: c.reachable,
+                  text: c.reachable
+                    ? c.via === 'proxy'
+                      ? 'Reachable via proxy'
+                      : 'Reachable (direct)'
+                    : (c.error ?? `Not reachable${c.via === 'proxy' ? ' via proxy' : ''}${c.status ? ` (HTTP ${c.status})` : ''}`),
+                });
+              } catch (err) {
+                setCheck({ busy: false, ok: false, text: describeError(err).detail });
+              }
+            }}
+          >
+            Check connection
+          </Button>
+          {r?.proxy ? (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => r.url && void save({ url: r.url, proxy: null }, 'Proxy removed')}>
+              Remove proxy
+            </Button>
+          ) : null}
           {r?.configured ? (
             <Button
               size="sm"
@@ -106,6 +162,11 @@ function RoutineSection() {
             </Button>
           ) : null}
         </div>
+        {check.text ? (
+          <p className={`check-result ${check.ok ? 'is-ok' : 'is-bad'}`} role="status">
+            <span className={`dot ${check.ok ? 'dot-ok' : 'dot-danger'}`} /> <span className={check.ok ? '' : 'mono'}>{check.text}</span>
+          </p>
+        ) : null}
       </form>
     </section>
   );

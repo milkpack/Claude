@@ -13,6 +13,7 @@ import type {
   ModelsResponse,
   ReviewRequest,
   ReviewResponse,
+  RoutineCheck,
   RoutineSettings,
   SessionMeta,
   Task,
@@ -177,7 +178,10 @@ export const api = {
     request<Workflow>(`/api/workflows/${enc(id)}/duplicate`, { method: 'POST', body: name ? { name } : {} }),
   fireTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}/fire`, { method: 'POST' }),
   routine: () => request<RoutineSettings>('/api/settings/routine'),
-  saveRoutine: (url: string, token: string) => request<RoutineSettings>('/api/settings/routine', { method: 'POST', body: { url, token } }),
+  /** token omitted keeps the saved one; proxy null removes it. */
+  saveRoutine: (body: { url: string; token?: string; proxy?: string | null }) =>
+    request<RoutineSettings>('/api/settings/routine', { method: 'POST', body }),
+  checkRoutine: () => request<RoutineCheck>('/api/settings/routine/check'),
   deleteRoutine: () => request<object>('/api/settings/routine', { method: 'DELETE' }),
   cancelTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}/cancel`, { method: 'POST' }),
 };

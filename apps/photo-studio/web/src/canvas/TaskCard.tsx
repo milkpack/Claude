@@ -92,7 +92,7 @@ export function TaskCard({
               <Cloud size={12} aria-hidden />
               <span>
                 {task.run.state === 'failed'
-                  ? `Cloud run failed${task.run.error ? `: ${task.run.error}` : ''}`
+                  ? 'Cloud run failed'
                   : status === 'open'
                     ? `Claude is working in the cloud · since ${formatDate(task.run.at)}`
                     : `Answered in the cloud`}
@@ -103,6 +103,11 @@ export function TaskCard({
                 </a>
               ) : null}
             </div>
+          ) : null}
+          {task.run?.error ? (
+            <p className="task-error mono" role="alert">
+              {task.run.error}
+            </p>
           ) : null}
           {cloud && status === 'open' ? (
             confirmFire ? (

@@ -2530,6 +2530,20 @@ code {
   height: 30px;
   font-size: var(--fs-md);
 }
+.routine-form .field-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-4);
+}
+.check-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+.check-result.is-bad {
+  color: var(--danger);
+}
 .shortcuts {
   display: grid;
   grid-template-columns: auto 1fr;
